@@ -26,4 +26,4 @@ jobs:
       - name: Install isolated dependencies
         run: uv sync --locked --extra dev --python '${{ matrix.python-version }}'
       - name: Unit and API tests
-        run: uv run --extra dev pytest -q
+        run: uv run --python '${{ matrix.python-version }}' --extra dev pytest -q
