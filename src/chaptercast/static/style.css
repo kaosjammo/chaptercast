@@ -26,3 +26,13 @@ a { color: #305843; }
   .eyebrow, a { color: #b5d5be; }
   button { background: #b5d5be; color: #171e1b; }
 }
+
+[hidden] { display: none !important; }
+label { display: block; margin: .8rem 0 .25rem; font-weight: 600; }
+input, select, textarea { max-width: 100%; width: 100%; min-height: 44px; padding: .6rem; border: 1px solid #8b978f; border-radius: .4rem; font: inherit; color: inherit; background: transparent; }
+textarea { resize: vertical; }
+.checkbox { display: flex; align-items: center; gap: .5rem; font-weight: 400; }
+.checkbox input { width: 1.2rem; flex-shrink: 0; }
+.hint { font-size: .9rem; margin: .35rem 0 .8rem; }
+#import-status { overflow-wrap: anywhere; }
+#ffn-fallback button { margin: .25rem 0; }

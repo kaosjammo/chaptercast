@@ -35,8 +35,9 @@ A native Android client, whole-story crawling, character-specific voices and pai
 ## Development and operation
 
 The foundation provides a health route, a static mobile shell and SQLite metadata
-tables for chapters, jobs and audio outputs. Import, queue execution, Kokoro
-narration, audio encoding and playback are later issues; none are implemented yet.
+tables for chapters, jobs and audio outputs. Text, TXT, EPUB chapter selection and
+bounded FanFiction.net chapter import are implemented. Queue execution, Kokoro
+narration, audio encoding and playback remain later issues.
 
 Use Python **3.11 or 3.12** and [uv](https://docs.astral.sh/uv/). From the repository
 root, install the locked dependencies in the project's `.venv`:
@@ -84,9 +85,83 @@ Keep private content, credentials, models, generated audio, browser evidence and
 logs in ignored `.runtime/` or `.evidence/` paths. If you override the data
 directory, keep it outside Git or add a local ignore rule before using it. Do not
 commit real chapter contents or device/host/authentication details. The tests use
-only original, labelled metadata fixtures.
+only original, labelled synthetic text, EPUB and HTML fixtures.
 
 Private Tailscale hosting and service activation are reserved for issue #8. These
 development commands do not configure Serve, Funnel or any live service. Later
 issues will add model-download and deployment instructions. Use content you are
 entitled to process; this application does not redistribute imported works.
+
+## Chapter import (issue #2)
+
+Use **Import a chapter** in the browser shell. Choose pasted text, a UTF-8 TXT
+upload, an EPUB upload or a supported FanFiction.net URL. EPUB upload first lists
+chapters in spine reading order; select one and press **Import selected chapter**.
+Only that chapter is saved. Imported metadata shown in the shell is for the
+current browser session; the persistent library is reserved for issue #5.
+Imports do not enqueue narration jobs.
+
+Blank lines preserve text paragraph boundaries; single line breaks remain within
+paragraphs. HTML block elements become paragraphs and `<br>` becomes a line break.
+FFN extraction reads only `#storytext`, excluding site navigation and inactive
+content. EPUB extraction reads the selected XHTML body, excluding navigation and
+inactive content. No embedded scripts, resources or links are executed or fetched.
+
+**Exclude recognised author notes** removes paragraphs starting `A/N:` or
+`Author's Note:` (including a curly apostrophe), plus EPUB elements explicitly
+marked as footnotes, endnotes, rearnotes or annotations. It is a conservative
+label-based filter: unlabelled notes and continuation paragraphs remain. Check or
+edit your source if more precise exclusion is needed. Headings and story paragraph
+boundaries are retained; this does not attempt to infer where unlabelled prose ends.
+
+Limits are fixed to keep import bounded:
+
+| Input | Limit |
+| --- | --- |
+| Normalised chapter text / TXT upload | 1 MiB UTF-8 |
+| Pasted JSON request envelope | 2 MiB |
+| EPUB upload | 10 MiB |
+| EPUB archive | 512 members, 32 MiB total expanded, 10 MiB per member, 200:1 ratio |
+| EPUB metadata or individual XHTML chapter | 2 MiB |
+| FFN response | 2 MiB HTML, 20 seconds total, 3 redirects |
+
+EPUB supports unencrypted ZIP stored/deflated members and local XHTML spine
+chapters (EPUB 2/3). Duplicate/unsafe member paths, symlinks, encryption, bad CRCs,
+missing metadata/spine references, malformed XHTML and XML entities are rejected.
+Members are validated without filesystem extraction. Navigation and non-linear
+spine items are not offered as chapters. Unsupported spine formats fail explicitly.
+
+Supported URL hosts are `fanfiction.net`, `www.fanfiction.net` and
+`m.fanfiction.net`, using HTTPS on port 443 and `/s/<story>/<chapter>[/<slug>]`.
+Story and chapter numbers must be positive; slugs use letters, digits, hyphens or
+underscores. Queries, credentials, fragments, other hosts and other URL types are
+rejected. Each redirect passes the same validation and fresh public-only DNS
+checks. The TLS connection pins the checked numeric address while validating the
+FFN hostname, avoiding a second DNS lookup or environment proxies. Mixed public
+and non-public answers, private/reserved addresses and IPv6 transition addresses
+are rejected. DNS waits are capped at 3 seconds, with at most two outstanding
+resolver calls; socket operations and an overall deadline bound the network fetch.
+
+HTTP 403/429/503, challenge pages and pages without a single story container
+return `ffn_blocked` with paste/upload fallback. Other network/content failures
+also fail explicitly. Synthetic fixture extraction tests establish parser and
+transport behaviour, **not live FFN availability**. A blocked live request does
+not make paste, TXT or EPUB import unavailable.
+
+Import routes:
+
+- `POST /api/import/text`: JSON `text`, optional `title`, `exclude_notes`.
+- `POST /api/import/upload?filename=original.txt`: raw UTF-8 file bytes; optional
+  `title` and `exclude_notes=true` query parameters. Use `.epub` for raw EPUB bytes;
+  the response contains an upload identifier and chapter choices.
+- `POST /api/import/epub`: JSON `upload_id`, `chapter_id`, optional `title`,
+  `exclude_notes`.
+- `POST /api/import/url`: JSON `url`, optional `title`, `exclude_notes`.
+
+Successful imports return metadata only, with HTTP 201. EPUB selection returns
+HTTP 200 before import. Errors return a stable `code` and a readable `message`
+without echoing submitted text. Normalised text and EPUB uploads use random names
+under the private data directory's `uploads/`; they are not served as static files.
+Original EPUB uploads remain local for subsequent chapter selection. Failed text
+saves roll back and remove the text file. FFN source HTML is never persisted.
+No imported content is published by these routes.

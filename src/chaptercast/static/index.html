@@ -15,10 +15,51 @@
         <h1>ChapterCast</h1>
         <p>Turn chapters into audio, at your own pace.</p>
       </header>
+      <section aria-labelledby="import-heading">
+        <h2 id="import-heading">Import a chapter</h2>
+        <p>Paste text, upload UTF-8 TXT or choose a chapter from an EPUB. FFN may block URL imports; paste and upload remain available.</p>
+        <form id="import-form">
+          <label for="import-source">Source</label>
+          <select id="import-source">
+            <option value="text">Pasted text</option>
+            <option value="upload">TXT or EPUB upload</option>
+            <option value="url">FanFiction.net chapter URL</option>
+          </select>
+          <label for="import-title">Title (optional)</label>
+          <input id="import-title" type="text" maxlength="200">
+          <div id="text-fields">
+            <label for="chapter-text">Chapter text</label>
+            <textarea id="chapter-text" rows="10" aria-describedby="text-limit"></textarea>
+            <p id="text-limit" class="hint">Up to 1 MiB of UTF-8 text. Blank lines separate paragraphs.</p>
+          </div>
+          <div id="upload-fields" hidden>
+            <label for="chapter-file">TXT or EPUB file</label>
+            <input id="chapter-file" type="file" accept=".txt,.epub">
+            <p class="hint">TXT: 1 MiB. EPUB: 10 MiB; choose one chapter after upload.</p>
+            <div id="epub-fields" hidden>
+              <label for="epub-chapter">EPUB chapter in reading order</label>
+              <select id="epub-chapter"></select>
+            </div>
+          </div>
+          <div id="url-fields" hidden>
+            <label for="chapter-url">HTTPS FanFiction.net chapter URL</label>
+            <input id="chapter-url" type="url" maxlength="512" placeholder="https://www.fanfiction.net/s/story/chapter/title">
+          </div>
+          <label class="checkbox"><input id="exclude-notes" type="checkbox"> Exclude recognised author notes and EPUB footnotes</label>
+          <p class="hint">Removes paragraphs starting “A/N:” or “Author’s Note:” and marked EPUB notes. Unlabelled notes remain; check your source before importing.</p>
+          <button id="import-submit" type="submit">Import chapter</button>
+        </form>
+        <p id="import-status" role="status" aria-live="polite"></p>
+        <div id="ffn-fallback" hidden>
+          <p>FanFiction.net blocked this request. No chapter was imported.</p>
+          <button id="fallback-paste" type="button">Paste text instead</button>
+          <button id="fallback-upload" type="button">Upload TXT or EPUB instead</button>
+        </div>
+      </section>
       <section aria-labelledby="library-heading">
-        <h2 id="library-heading">Your chapters</h2>
-        <p>Chapter import, narration and playback are not available yet.</p>
-        <p>This is the application foundation. Your library will appear here.</p>
+        <h2 id="library-heading">Imported this session</h2>
+        <ul id="imported-chapters"></ul>
+        <p>Imported chapters are stored privately on this server. Narration and playback are not available yet.</p>
       </section>
       <section aria-labelledby="connection-heading">
         <h2 id="connection-heading">Server connection</h2>

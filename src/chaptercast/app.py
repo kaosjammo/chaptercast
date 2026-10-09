@@ -4,11 +4,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from chaptercast.config import Settings
 from chaptercast.database import initialise
+from chaptercast.import_api import router
+from chaptercast.imports import ImportFailure
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -26,6 +28,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="ChapterCast", lifespan=lifespan)
     app.state.settings = settings
+    app.include_router(router)
+
+    @app.exception_handler(ImportFailure)
+    async def import_error(request, exc: ImportFailure):
+        return JSONResponse({"code": exc.code, "message": exc.message}, status_code=exc.status)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/health")
