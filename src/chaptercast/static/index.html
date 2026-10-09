@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>ChapterCast</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Your local listening library</p>
+        <h1>ChapterCast</h1>
+        <p>Turn chapters into audio, at your own pace.</p>
+      </header>
+      <section aria-labelledby="library-heading">
+        <h2 id="library-heading">Your chapters</h2>
+        <p>Chapter import, narration and playback are not available yet.</p>
+        <p>This is the application foundation. Your library will appear here.</p>
+      </section>
+      <section aria-labelledby="connection-heading">
+        <h2 id="connection-heading">Server connection</h2>
+        <p id="connection-status" role="status" aria-live="polite">Checking connection…</p>
+        <button id="check-connection" type="button">Check connection</button>
+        <noscript><p>Enable JavaScript to check the connection, or visit <a href="/health">server health</a>.</p></noscript>
+      </section>
+    </main>
+  </body>
+</html>

@@ -34,4 +34,59 @@ A native Android client, whole-story crawling, character-specific voices and pai
 
 ## Development and operation
 
-Implementation issues will add verified setup, test, model-download and service instructions. See GitHub issues for current acceptance and evidence. Use content you are entitled to process; this application does not redistribute imported works.
+The foundation provides a health route, a static mobile shell and SQLite metadata
+tables for chapters, jobs and audio outputs. Import, queue execution, Kokoro
+narration, audio encoding and playback are later issues; none are implemented yet.
+
+Use Python **3.11 or 3.12** and [uv](https://docs.astral.sh/uv/). From the repository
+root, install the locked dependencies in the project's `.venv`:
+
+```sh
+export UV_CACHE_DIR="$PWD/.runtime/uv-cache"
+export UV_PYTHON_DOWNLOADS=never
+uv sync --locked --extra dev --python 3.11
+uv run --extra dev pytest -q
+```
+
+The `dev` extra contains the unit/API test dependencies. Tests use temporary
+databases and in-process HTTP requests; they need no credentials, models, FFmpeg,
+TTS service or external integration. CI runs this suite on Python 3.11 and 3.12.
+Dependency installation requires access to PyPI. If `uv` is outside your PATH,
+use its existing absolute executable path rather than installing a duplicate.
+
+Start a foreground local development server (this does not install or activate a
+service):
+
+```sh
+uv run chaptercast
+# Equivalent: uv run python -m chaptercast
+```
+
+Open `http://127.0.0.1:8000/` for the shell. `GET /health` returns
+`{"status":"ok"}` after startup initialises the database. Stop with Ctrl+C.
+The health response establishes application availability, not narration readiness.
+
+Configuration is read from environment variables. `.env.example` documents them;
+the application does **not** automatically load `.env` files:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CHAPTERCAST_HOST` | `127.0.0.1` | Loopback bind address; non-loopback values are rejected. |
+| `CHAPTERCAST_PORT` | `8000` | Local TCP port, 1–65535. |
+| `CHAPTERCAST_DATA_DIR` | `.runtime` | Private data directory, relative to the working directory or absolute. |
+
+Startup creates `metadata.sqlite3`, `uploads/`, `models/` and `audio/` beneath the
+data directory. Schema version 1 uses SQLite foreign keys and constrained job
+states and output formats. A newer schema version fails startup rather than being
+overwritten. This schema does not yet implement a durable queue.
+
+Keep private content, credentials, models, generated audio, browser evidence and
+logs in ignored `.runtime/` or `.evidence/` paths. If you override the data
+directory, keep it outside Git or add a local ignore rule before using it. Do not
+commit real chapter contents or device/host/authentication details. The tests use
+only original, labelled metadata fixtures.
+
+Private Tailscale hosting and service activation are reserved for issue #8. These
+development commands do not configure Serve, Funnel or any live service. Later
+issues will add model-download and deployment instructions. Use content you are
+entitled to process; this application does not redistribute imported works.

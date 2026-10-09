@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 .venv/
+.uv-cache/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -17,6 +18,11 @@ test-results/
 data/
 models/
 outputs/
+uploads/
+credentials/
+secrets/
+*.pem
+*.key
 *.sqlite
 *.sqlite3
 *.db
