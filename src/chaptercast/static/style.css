@@ -36,3 +36,27 @@ textarea { resize: vertical; }
 .hint { font-size: .9rem; margin: .35rem 0 .8rem; }
 #import-status { overflow-wrap: anywhere; }
 #ffn-fallback button { margin: .25rem 0; }
+
+nav, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
+nav a, .actions a { padding: .5rem 0; min-height: 44px; }
+nav { margin-top: 1rem; }
+main { width: min(100%, 64rem); }
+audio, progress { display: block; width: 100%; min-width: 0; margin: .75rem 0; }
+h3 { font-size: 1.05rem; margin: .4rem 0; overflow-wrap: anywhere; }
+.cards { list-style: none; padding: 0; margin: .75rem 0; }
+.cards li { border-top: 1px solid #8b978f; padding: .75rem 0; }
+.cards p { margin: .4rem 0 .75rem; }
+.section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+.section-heading h2 { margin: 0; }
+.settings-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+#seek { padding: 0; accent-color: #305843; }
+#player-section { scroll-margin-top: 1rem; }
+@media (max-width: 400px) {
+  main { padding: .75rem; }
+  section { padding: .9rem; }
+  .settings-row { grid-template-columns: 1fr; gap: 0; }
+  button { max-width: 100%; }
+}
+@media (prefers-color-scheme: dark) {
+  #seek { accent-color: #b5d5be; }
+}

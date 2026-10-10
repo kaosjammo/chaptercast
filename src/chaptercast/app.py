@@ -3,7 +3,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -43,6 +43,20 @@ def create_app(settings: Settings | None = None, *, backend: Backend | None = No
     app.state.settings = settings
     app.include_router(router)
     app.include_router(job_router)
+
+    @app.middleware("http")
+    async def private_responses(request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+    @app.get("/api/library")
+    def library(request: Request, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100)):
+        result = request.app.state.jobs.library(offset, limit)
+        worker = request.app.state.worker
+        result["worker"] = {"backend_ready": worker.backend is not None, "worker_owned": worker.owns_lock}
+        return result
 
     @app.exception_handler(ImportFailure)
     async def import_error(request, exc: ImportFailure):

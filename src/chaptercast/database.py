@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS chapters (
     id INTEGER PRIMARY KEY,
@@ -95,6 +95,15 @@ CREATE TABLE job_chunks (
 );
 """
 
+MIGRATION_V3 = """
+CREATE TABLE chapter_jobs (
+    chapter_id INTEGER NOT NULL REFERENCES chapters(id),
+    job_id INTEGER NOT NULL REFERENCES jobs(id),
+    PRIMARY KEY (chapter_id, job_id)
+);
+INSERT INTO chapter_jobs (chapter_id, job_id) SELECT chapter_id, id FROM jobs;
+"""
+
 
 @contextmanager
 def connect(path: Path) -> Iterator[sqlite3.Connection]:
@@ -118,7 +127,10 @@ def initialise(path: Path) -> None:
             # A transaction keeps the tables and their version marker together.
             # execute() retains the admission lock; executescript() would first
             # commit it and allow another startup to race the schema migration.
-            script = (SCHEMA_V1 if version == 0 else "") + MIGRATION_V2
+            script = (SCHEMA_V1 if version == 0 else "")
+            if version < 2:
+                script += MIGRATION_V2
+            script += MIGRATION_V3
             for statement in script.split(";"):
                 if statement.strip():
                     db.execute(statement)

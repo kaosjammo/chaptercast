@@ -59,4 +59,6 @@ def cancel(identifier: int, request: Request):
 @router.get("/{identifier}/outputs/{format}")
 def output(identifier: int, format: str, request: Request):
     path = request.app.state.jobs.output(identifier, format)
-    return FileResponse(path, media_type={"opus": "audio/ogg", "m4a": "audio/mp4"}[format], filename=f"chapter.{format}")
+    return FileResponse(path, media_type={"opus": "audio/ogg", "m4a": "audio/mp4"}[format],
+                        filename=request.app.state.jobs.download_name(identifier, format),
+                        headers={"Cache-Control": "private, no-store"})

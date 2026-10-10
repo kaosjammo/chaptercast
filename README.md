@@ -2,7 +2,7 @@
 
 A private chapter-to-audiobook tool: submit text or a supported chapter URL from a phone, generate narration on a desktop, and play or download a compact complete chapter.
 
-**Status:** implementation in progress. Local Kokoro narration and compact export are implemented; no deployed service is claimed.
+**Status:** implementation in progress. Local Kokoro narration, compact export and a responsive library/player are implemented; no deployed service is claimed.
 
 ## MVP architecture
 
@@ -39,8 +39,7 @@ tables for chapters, jobs, chunk checkpoints and audio outputs. Text, TXT, EPUB
 chapter selection and bounded FanFiction.net chapter import are implemented. A
 durable server-owned queue is implemented behind a synthesis/encoding adapter.
 Local CPU Kokoro narration and FFmpeg export are available after explicit model
-setup (issue #4). Without setup, jobs remain queued. The persistent library and
-chapter player remain issue #5 work.
+setup (issue #4). Without setup, jobs remain queued. The persistent library and responsive chapter player are implemented (issue #5).
 
 Use Python **3.11 or 3.12** and [uv](https://docs.astral.sh/uv/). From the repository
 root, install the locked dependencies in the project's `.venv`:
@@ -84,8 +83,9 @@ the application does **not** automatically load `.env` files:
 | `CHAPTERCAST_INFERENCE_THREADS` | `4` | CPU inference threads, restricted to 1–4; one interop thread. |
 
 Startup creates `metadata.sqlite3`, `uploads/`, `models/` and `audio/` beneath the
-data directory. Schema version 2 uses SQLite foreign keys, constrained job
-states/output formats and chunk checkpoints. Version 1 migrates transactionally:
+data directory. Schema version 3 uses SQLite foreign keys, constrained job
+states/output formats, chunk checkpoints and chapter/job links for shared cache
+results. Version 2 gains these links without changing existing jobs. Version 1 migrates transactionally:
 imports and legacy output records are retained; old queued/running jobs become
 failed with `legacy_job_not_resumable` because they have no content/settings
 snapshot. Legacy outputs have no validation manifest and are not served. A newer
@@ -106,8 +106,8 @@ entitled to process; this application does not redistribute imported works.
 Use **Import a chapter** in the browser shell. Choose pasted text, a UTF-8 TXT
 upload, an EPUB upload or a supported FanFiction.net URL. EPUB upload first lists
 chapters in spine reading order; select one and press **Import selected chapter**.
-Only that chapter is saved. Imported metadata shown in the shell is for the
-current browser session; the persistent library is reserved for issue #5.
+Only that chapter is saved. Imported metadata appears in the persistent, paginated **Library**, including
+after reload or server restart.
 Imports do not automatically enqueue narration jobs. **Generate audio** submits
 a chapter using the voice and speed selected in the preview controls.
 
@@ -295,8 +295,8 @@ same durable queue, limits, checkpoints and output validation as chapters:
 `POST /api/jobs/preview` accepts optional `voice`, `speed`, `formats` and returns
 HTTP 202 with a job. Poll/download/cancel with the existing job routes. Repeated
 previews reuse one private sample chapter and the normal settings/content cache.
-The shell can play the short preview and download completed chapter exports;
-a persistent library and chapter player are reserved for issue #5.
+The browser can play the short preview and play/download completed chapter exports
+through its persistent library and chapter player.
 
 One reusable spawned process performs inference on CPU, with at most four
 inference threads and one interop thread. The parent checks cancellation and
@@ -340,3 +340,60 @@ interrupted job resumes without regenerating its intact first checkpoint.
 Generated audio and input live under a fresh ignored timestamp directory.
 This is explicit local integration evidence, not CI, browser rendering,
 physical-phone behaviour, controller acceptance, issue closure or deployment.
+
+
+## Library and chapter player (issue #5)
+
+The library lists privately stored imports, their latest generation status and an
+**Open player** button for the newest completed audio. If a newer job fails or is
+still running, **Open previous audio** keeps the previous completed result
+available. Identical imports retain links to a reused job across reloads. A voice
+preview stays separate from imported chapters. **Refresh library** retries a
+failed connection; automatic polling also reconnects. Failed, cancelled and
+unavailable narration states remain visible without discarding imports.
+
+The queue shows synthesis chunk counts and progress, plus **Cancel generation**.
+Completion includes encoding and validation; 100% synthesis alone does not make
+an output playable. Submitted work continues on the server when the browser
+closes. Voice and **Narration speed** apply to new jobs. **Playback speed** changes
+only the current player's rate, from 0.5× to 2×, without regenerating audio.
+
+The player provides native audio controls, an accessible position slider,
+15-second back/forward buttons, format selection and complete-file download
+links. It prefers Opus where the browser reports support; select M4A if needed.
+Loading, buffering and media errors are explicit. Download filenames use a short
+ASCII title slug and chapter identifier, with path/header characters removed.
+Imported titles are inserted as text, never HTML. Controls wrap at narrow widths,
+have visible keyboard focus and at least 44-pixel touch targets.
+
+Position, rate, format and the last selected chapter are saved in **this browser's
+local storage**, independently for each chapter/content/generation setting.
+Reload restores the position once real media metadata is available, without
+autoplay. Changing chapter settings starts a distinct saved position; switching
+between chapters preserves each one. Finishing resets the saved position to the
+beginning. Clearing browser storage, using another browser/origin, or storage
+being unavailable removes that persistence. Storage failures show a message;
+positions are not synchronised to other devices.
+
+**Streaming requires access to this server.** Download a complete Opus or M4A file
+for use in a separate compatible player without server connectivity. This UI does
+not claim offline browser playback or installation; that work belongs to issue
+#6. A desktop browser at a mobile viewport does not establish Android screen-off
+playback or physical-phone compatibility.
+
+`GET /api/library?offset=0&limit=20` returns a page of chapter metadata and linked
+job status/output URLs, plus the bounded job history and worker readiness. Limit
+is 1–100; offset must be nonnegative. Text, source URLs and filesystem paths are
+not exposed. Schema migration backfills existing chapter/job links. Metadata and
+media responses use `Cache-Control: no-store`. Completed media routes use HTTP
+byte ranges for seeking and check file integrity before serving.
+
+Local verification uses the standard `uv run --extra dev pytest -q` command.
+Library/API tests cover migration, persistence, shared cache links, pagination,
+private metadata, safe filenames, 206/416 range responses and damaged output
+rejection. Transport fixture bytes are not proof of playable media. Real browser
+checks must use actual validated audio: play both formats, seek, change rate,
+reload and switch chapters to check resume, exercise import/queue/media errors,
+and inspect narrow and desktop layouts. Keep browser receipts and screenshots
+under ignored `.evidence/issue-5/`; controller acceptance and publication remain
+separate from worker implementation.

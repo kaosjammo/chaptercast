@@ -14,7 +14,50 @@
         <p class="eyebrow">Your local listening library</p>
         <h1>ChapterCast</h1>
         <p>Turn chapters into audio, at your own pace.</p>
+        <nav aria-label="Main"><a href="#library-heading">Library</a><a href="#import-heading">Import</a><a href="#voice-heading">Voice preview</a></nav>
       </header>
+      <section aria-labelledby="player-heading" id="player-section" hidden>
+        <h2 id="player-heading">Chapter player</h2>
+        <h3 id="player-title"></h3>
+        <p class="hint">Streaming needs this server. Download a complete file for playback in a separate player without server connectivity.</p>
+        <audio id="chapter-player" controls preload="metadata"></audio>
+        <div class="actions">
+          <button id="player-toggle" type="button" disabled>Play</button>
+          <button id="skip-back" type="button" disabled>Back 15 seconds</button>
+          <button id="skip-forward" type="button" disabled>Forward 15 seconds</button>
+        </div>
+        <label for="seek">Chapter position</label>
+        <input id="seek" type="range" min="0" max="1" step="0.1" value="0" disabled>
+        <p id="player-time" class="hint">Loading duration…</p>
+        <div class="settings-row">
+          <div><label for="playback-rate">Playback speed</label>
+            <select id="playback-rate">
+              <option value="0.5">0.5×</option><option value="0.75">0.75×</option>
+              <option value="1" selected>1×</option><option value="1.25">1.25×</option>
+              <option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
+            </select>
+          </div>
+          <div><label for="playback-format">Audio format</label><select id="playback-format"></select></div>
+        </div>
+        <p id="player-status" role="status" aria-live="polite"></p>
+        <p id="position-status" class="hint" role="status">Position and playback speed are saved per chapter in this browser.</p>
+        <div id="player-downloads" class="actions"></div>
+      </section>
+      <section aria-labelledby="library-heading">
+        <div class="section-heading"><h2 id="library-heading">Library</h2><button id="refresh-library" type="button">Refresh library</button></div>
+        <p class="hint">Chapters and generation jobs are stored privately on this server. Generate with the voice and narration speed selected below.</p>
+        <p id="library-status" role="status" aria-live="polite">Loading library…</p>
+        <ul id="library-list" class="cards"></ul>
+        <div class="actions"><button id="library-previous" type="button" disabled>Previous page</button><span id="library-page"></span><button id="library-next" type="button" disabled>Next page</button></div>
+      </section>
+      <section aria-labelledby="queue-heading">
+        <h2 id="queue-heading">Generation queue</h2>
+        <p id="worker-status" class="hint"></p>
+        <p class="hint">Progress counts synthesised chunks. At 100%, encoding and validation may still be running. Closing this page does not cancel a job.</p>
+        <ul id="queue-list" class="cards"></ul>
+        <p id="queue-empty">No active jobs.</p>
+        <p id="generation-status" role="status" aria-live="polite"></p>
+      </section>
       <section aria-labelledby="voice-heading">
         <h2 id="voice-heading">British voice preview</h2>
         <p>An original short sample, generated locally with the same settings as a chapter.</p>
@@ -26,12 +69,11 @@
             <option value="bm_george">George (British)</option>
             <option value="bm_lewis">Lewis (British)</option>
           </select>
-          <label for="speed">Speed (0.5–2)</label>
+          <label for="speed">Narration speed (0.5–2)</label>
           <input id="speed" type="number" min="0.5" max="2" step="0.05" value="1" required>
           <button id="preview-submit" type="submit">Generate preview</button>
         </form>
-        <button id="generation-cancel" type="button" hidden>Cancel generation</button>
-        <p id="generation-status" role="status" aria-live="polite"></p>
+        <p id="preview-status" role="status" aria-live="polite">Generate a sample to hear the selected voice.</p>
         <audio id="voice-preview" controls preload="none" hidden></audio>
         <div id="generation-downloads"></div>
       </section>
@@ -75,11 +117,6 @@
           <button id="fallback-paste" type="button">Paste text instead</button>
           <button id="fallback-upload" type="button">Upload TXT or EPUB instead</button>
         </div>
-      </section>
-      <section aria-labelledby="library-heading">
-        <h2 id="library-heading">Imported this session</h2>
-        <ul id="imported-chapters"></ul>
-        <p>Imported chapters are stored privately on this server. Generate mono Opus and M4A with the voice and speed selected above. The persistent library and chapter player are planned for issue #5.</p>
       </section>
       <section aria-labelledby="connection-heading">
         <h2 id="connection-heading">Server connection</h2>

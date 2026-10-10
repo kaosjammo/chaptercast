@@ -125,6 +125,8 @@ class JobStore:
                 db.execute("UPDATE jobs SET status='failed', error='output_integrity_failed' WHERE id=?", (existing["id"],))
                 existing = None
             if existing:
+                db.execute("INSERT OR IGNORE INTO chapter_jobs (chapter_id, job_id) VALUES (?, ?)",
+                           (chapter_id, existing["id"]))
                 return self._get(db, existing["id"])
             count, active, reserved = db.execute("""SELECT count(*),
                 coalesce(sum(status IN ('queued','running') OR owner IS NOT NULL), 0),
@@ -142,15 +144,19 @@ class JobStore:
                 (chapter_id, content_key, voice_key, settings_key, cache_key, settings_json, len(chunks))).lastrowid
             db.executemany("INSERT INTO job_chunks (job_id, position, text, content_key) VALUES (?, ?, ?, ?)",
                            [(identifier, i, chunk, digest(chunk.encode())) for i, chunk in enumerate(chunks)])
+            db.execute("INSERT INTO chapter_jobs (chapter_id, job_id) VALUES (?, ?)", (chapter_id, identifier))
             return self._get(db, identifier)
 
     def _get(self, db, identifier: int) -> dict:
         job = db.execute("""SELECT id, chapter_id, status, content_key, voice_key, settings_key, cache_key,
-            total_chunks, completed_chunks, error, created_at, started_at, finished_at
+            total_chunks, completed_chunks, error, created_at, started_at, finished_at, settings_json
             FROM jobs WHERE id = ?""", (identifier,)).fetchone()
         if job is None:
             raise JobFailure("missing_job", "Job does not exist.", 404)
         result = dict(job)
+        settings = json.loads(result.pop("settings_json") or "{}")
+        result["voice"] = settings.get("voice")
+        result["speed"] = settings.get("speed")
         result["progress"] = job["completed_chunks"] / job["total_chunks"] if job["total_chunks"] else 0
         result["outputs"] = []
         if job["status"] == "completed":
@@ -162,6 +168,35 @@ class JobStore:
         with connect(self.database) as db:
             db.row_factory = sqlite3.Row
             return self._get(db, identifier)
+
+    def library(self, offset: int, limit: int) -> dict:
+        with connect(self.database) as db:
+            db.row_factory = sqlite3.Row
+            # Read a consistent page and queue without exposing text or disk paths.
+            db.execute("BEGIN")
+            where = "text_path != 'uploads/voice-preview.txt'"
+            total = db.execute(f"SELECT count(*) FROM chapters WHERE {where}").fetchone()[0]
+            chapters = []
+            for row in db.execute(f"SELECT id, title, created_at FROM chapters WHERE {where} ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)):
+                chapter = dict(row)
+                chapter["jobs"] = [self._get(db, link[0]) for link in db.execute(
+                    "SELECT job_id FROM chapter_jobs WHERE chapter_id=? ORDER BY job_id DESC", (row["id"],))]
+                chapters.append(chapter)
+            jobs = []
+            for row in db.execute("SELECT jobs.id, chapters.title, chapters.text_path FROM jobs JOIN chapters ON chapters.id=jobs.chapter_id ORDER BY jobs.id DESC LIMIT 100"):
+                job = self._get(db, row["id"])
+                job["title"] = row["title"]
+                job["preview"] = row["text_path"] == "uploads/voice-preview.txt"
+                jobs.append(job)
+            return {"chapters": chapters, "jobs": jobs, "total": total, "offset": offset, "limit": limit}
+
+    def download_name(self, identifier: int, format: str) -> str:
+        # A short ASCII basename avoids path components, controls and header syntax.
+        import re
+        with connect(self.database) as db:
+            row = db.execute("SELECT chapters.id, title FROM chapters JOIN jobs ON jobs.chapter_id=chapters.id WHERE jobs.id=?", (identifier,)).fetchone()
+        title = re.sub(r"[^A-Za-z0-9_-]+", "-", row[1]).strip("-_")[:80] or "audio"
+        return f"chapter-{row[0]}-{title}.{format}"
 
     def completed_valid(self, db, identifier: int) -> bool:
         """Reuse only the intact set that originally passed media validation."""

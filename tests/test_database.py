@@ -14,7 +14,7 @@ def test_schema_is_idempotent_and_preserves_metadata(tmp_path):
         tables = {row[0] for row in db.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         )}
-        assert tables == {"chapters", "jobs", "audio_outputs", "job_chunks"}
+        assert tables == {"chapters", "jobs", "audio_outputs", "job_chunks", "chapter_jobs"}
         db.execute(
             "INSERT INTO chapters (title, text_path) VALUES (?, ?)",
             ("Original test fixture", "uploads/original.txt"),
