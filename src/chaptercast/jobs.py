@@ -11,8 +11,9 @@ from chaptercast.chunks import split_chunks
 from chaptercast.database import connect
 from chaptercast.imports import MAX_TEXT_BYTES, text_chapter
 
-PIPELINE_VERSION = "kokoro-82m:queue-v1"
+PIPELINE_VERSION = "kokoro-0.9.4:82m-f3ff3571791e39611d31c381e3a41a3af07b4987:misaki-0.9.4:spacy-sm-3.8.0:pcm16-24k:opus32-cbr:aac48-fragmented:v2"
 CHUNK_CHARACTERS = 1000
+PREVIEW_TEXT = "This is an original ChapterCast British voice preview. The rain has stopped, and the garden gate is open. Take your time; the next chapter is waiting."
 
 
 def digest(data: bytes) -> str:
@@ -75,6 +76,22 @@ class JobStore:
         if not path.is_relative_to(self.root / directory):
             raise JobFailure("invalid_path", "Private artifact path is invalid.")
         return path
+
+    def preview(self, settings: GenerationSettings) -> dict:
+        # A fixed original sample uses the same durable queue, quotas and cache.
+        # Reuse one private chapter instead of accumulating imports per click.
+        relative = "uploads/voice-preview.txt"
+        with connect(self.database) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id FROM chapters WHERE text_path=?", (relative,)).fetchone()
+            path = self.private_path(relative, "uploads")
+            with path.open("wb") as stream:
+                path.chmod(0o600)
+                stream.write(PREVIEW_TEXT.encode())
+            identifier = row[0] if row else db.execute(
+                "INSERT INTO chapters (title, text_path) VALUES (?, ?)",
+                ("Original British voice preview", relative)).lastrowid
+        return self.enqueue(identifier, settings)
 
     def enqueue(self, chapter_id: int, settings: GenerationSettings | None = None) -> dict:
         if type(chapter_id) is not int or chapter_id <= 0:

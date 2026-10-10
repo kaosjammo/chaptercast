@@ -11,6 +11,21 @@ from chaptercast.jobs import GenerationSettings, JobFailure
 router = APIRouter(prefix="/api/jobs")
 
 
+@router.post("/preview", status_code=202)
+async def preview(request: Request):
+    raw = await body(request, 8192)
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict) or set(data) - {"voice", "speed", "formats"}:
+            raise ValueError("fields")
+        settings = GenerationSettings(**data)
+    except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
+        raise JobFailure("invalid_input", "Provide supported preview settings.") from exc
+    if request.app.state.worker.backend is None:
+        raise JobFailure("backend_unavailable", "Install the tts extra and run chaptercast-models locally first.", 503)
+    return await run_in_threadpool(request.app.state.jobs.preview, settings)
+
+
 @router.post("", status_code=202)
 async def enqueue(request: Request):
     raw = await body(request, 8192)

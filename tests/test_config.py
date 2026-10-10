@@ -40,3 +40,13 @@ def test_invalid_ports_are_rejected(port):
 def test_direct_settings_validate_binding(tmp_path):
     with pytest.raises(ValueError, match="loopback"):
         Settings(host="0.0.0.0", data_dir=Path(tmp_path))
+
+
+def test_inference_threads_are_cpu_bounded():
+    assert Settings.from_env({}).inference_threads == 4
+    assert Settings.from_env({'CHAPTERCAST_INFERENCE_THREADS': '2'}).inference_threads == 2
+    for value in ('0', '5', 'invalid'):
+        with pytest.raises(ValueError):
+            Settings.from_env({'CHAPTERCAST_INFERENCE_THREADS': value})
+    with pytest.raises(ValueError):
+        Settings(inference_threads=True)

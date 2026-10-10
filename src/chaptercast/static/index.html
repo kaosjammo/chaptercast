@@ -15,6 +15,26 @@
         <h1>ChapterCast</h1>
         <p>Turn chapters into audio, at your own pace.</p>
       </header>
+      <section aria-labelledby="voice-heading">
+        <h2 id="voice-heading">British voice preview</h2>
+        <p>An original short sample, generated locally with the same settings as a chapter.</p>
+        <form id="preview-form">
+          <label for="voice">Voice</label>
+          <select id="voice">
+            <option value="bf_emma">Emma (British, default)</option>
+            <option value="bf_isabella">Isabella (British)</option>
+            <option value="bm_george">George (British)</option>
+            <option value="bm_lewis">Lewis (British)</option>
+          </select>
+          <label for="speed">Speed (0.5–2)</label>
+          <input id="speed" type="number" min="0.5" max="2" step="0.05" value="1" required>
+          <button id="preview-submit" type="submit">Generate preview</button>
+        </form>
+        <button id="generation-cancel" type="button" hidden>Cancel generation</button>
+        <p id="generation-status" role="status" aria-live="polite"></p>
+        <audio id="voice-preview" controls preload="none" hidden></audio>
+        <div id="generation-downloads"></div>
+      </section>
       <section aria-labelledby="import-heading">
         <h2 id="import-heading">Import a chapter</h2>
         <p>Paste text, upload UTF-8 TXT or choose a chapter from an EPUB. FFN may block URL imports; paste and upload remain available.</p>
@@ -59,7 +79,7 @@
       <section aria-labelledby="library-heading">
         <h2 id="library-heading">Imported this session</h2>
         <ul id="imported-chapters"></ul>
-        <p>Imported chapters are stored privately on this server. Narration and playback are not available yet.</p>
+        <p>Imported chapters are stored privately on this server. Generate mono Opus and M4A with the voice and speed selected above. The persistent library and chapter player are planned for issue #5.</p>
       </section>
       <section aria-labelledby="connection-heading">
         <h2 id="connection-heading">Server connection</h2>

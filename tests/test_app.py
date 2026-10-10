@@ -23,7 +23,7 @@ def test_static_shell_and_assets(tmp_path):
         assert response.status_code == 200
         assert "ChapterCast" in response.text
         assert 'name="viewport"' in response.text
-        assert "not available yet" in response.text
+        assert "British voice preview" in response.text
         assert client.get("/static/style.css").headers["content-type"].startswith("text/css")
         assert client.get("/static/app.js").status_code == 200
         assert client.get("/static/../metadata.sqlite3").status_code == 404

@@ -114,12 +114,94 @@ form.addEventListener("submit", async (event) => {
     }
     const item = document.createElement("li");
     item.textContent = `${result.title} — ${result.paragraphs} paragraphs, ${result.characters} characters`;
+    const generate = document.createElement("button");
+    generate.type = "button";
+    generate.textContent = "Generate audio";
+    generate.addEventListener("click", () => generateAudio("/api/jobs", {chapter_id: result.id}, false));
+    item.append(" ", generate);
     document.getElementById("imported-chapters").prepend(item);
-    importStatus.textContent = `Imported “${result.title}” privately. Narration is not available yet.`;
+    importStatus.textContent = `Imported “${result.title}” privately. Use Generate audio to narrate it.`;
   } catch (error) {
     importStatus.textContent = error.message || "Could not reach the server. Try again.";
     fallback.hidden = error.code !== "ffn_blocked";
   } finally {
     submit.disabled = false;
+  }
+});
+
+const generationStatus = document.getElementById("generation-status");
+const previewSubmit = document.getElementById("preview-submit");
+const cancelGeneration = document.getElementById("generation-cancel");
+const previewAudio = document.getElementById("voice-preview");
+const downloads = document.getElementById("generation-downloads");
+let activeJob = null;
+let generating = false;
+
+async function generateAudio(path, extra, preview) {
+  if (generating) {
+    generationStatus.textContent = "Wait for the current generation or cancel it first.";
+    return;
+  }
+  generating = true;
+  previewSubmit.disabled = true;
+  previewAudio.pause();
+  previewAudio.hidden = true;
+  previewAudio.removeAttribute("src");
+  downloads.replaceChildren();
+  generationStatus.textContent = "Submitting local narration…";
+  try {
+    const worker = await importRequest("/api/jobs/worker", {cache: "no-store"});
+    if (!worker.backend_ready) throw new Error("Local narration needs the tts extra and chaptercast-models setup.");
+    let job = await importRequest(path, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...extra, voice: document.getElementById("voice").value,
+        speed: Number(document.getElementById("speed").value), formats: ["opus", "m4a"]}),
+    });
+    activeJob = job.id;
+    cancelGeneration.hidden = false;
+    while (["queued", "running"].includes(job.status)) {
+      generationStatus.textContent = `${job.status}: ${job.completed_chunks}/${job.total_chunks} chunks. Encoding follows synthesis.`;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      job = await importRequest(`/api/jobs/${job.id}`, {cache: "no-store"});
+    }
+    generationStatus.textContent = job.status === "completed" ? "Local narration complete." : `Generation ${job.status}.`;
+    if (job.status === "completed") {
+      for (const output of job.outputs) {
+        const link = document.createElement("a");
+        link.href = output.url;
+        link.textContent = `Download ${output.format.toUpperCase()} (${output.duration_seconds.toFixed(1)} seconds)`;
+        link.download = `chapter.${output.format}`;
+        const paragraph = document.createElement("p");
+        paragraph.append(link);
+        downloads.append(paragraph);
+      }
+      if (preview) {
+        const format = previewAudio.canPlayType('audio/ogg; codecs="opus"') ? "opus" : "m4a";
+        previewAudio.src = job.outputs.find((output) => output.format === format).url;
+        previewAudio.hidden = false;
+        previewAudio.load();
+      }
+    }
+  } catch (error) {
+    generationStatus.textContent = `${error.message || "Could not reach the server."} Submitted jobs continue on the server; poll their job URL after reconnecting.`;
+  } finally {
+    generating = false;
+    activeJob = null;
+    previewSubmit.disabled = false;
+    cancelGeneration.hidden = true;
+  }
+}
+
+document.getElementById("preview-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  generateAudio("/api/jobs/preview", {}, true);
+});
+cancelGeneration.addEventListener("click", async () => {
+  if (activeJob === null) return;
+  try {
+    await importRequest(`/api/jobs/${activeJob}/cancel`, {method: "POST"});
+    generationStatus.textContent = "Cancellation requested.";
+  } catch (error) {
+    generationStatus.textContent = error.message || "Cancellation failed; try again.";
   }
 });

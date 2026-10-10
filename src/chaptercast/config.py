@@ -12,6 +12,7 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
     data_dir: Path = field(default_factory=lambda: Path(".runtime"))
+    inference_threads: int = 4
 
     def __post_init__(self) -> None:
         try:
@@ -22,6 +23,8 @@ class Settings:
             raise ValueError("host must be a loopback address or localhost")
         if not 1 <= self.port <= 65535:
             raise ValueError("port must be between 1 and 65535")
+        if type(self.inference_threads) is not int or not 1 <= self.inference_threads <= 4:
+            raise ValueError("inference threads must be between 1 and 4")
         object.__setattr__(self, "data_dir", Path(self.data_dir).expanduser().resolve())
 
     @classmethod
@@ -35,4 +38,5 @@ class Settings:
             host=values.get("CHAPTERCAST_HOST", "127.0.0.1"),
             port=port,
             data_dir=Path(values.get("CHAPTERCAST_DATA_DIR", ".runtime")),
+            inference_threads=int(values.get("CHAPTERCAST_INFERENCE_THREADS", "4")),
         )

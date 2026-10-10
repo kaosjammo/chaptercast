@@ -2,7 +2,7 @@
 
 A private chapter-to-audiobook tool: submit text or a supported chapter URL from a phone, generate narration on a desktop, and play or download a compact complete chapter.
 
-**Status:** implementation in progress. No deployed service or working narration is claimed yet.
+**Status:** implementation in progress. Local Kokoro narration and compact export are implemented; no deployed service is claimed.
 
 ## MVP architecture
 
@@ -38,9 +38,9 @@ The foundation provides a health route, a static mobile shell and SQLite metadat
 tables for chapters, jobs, chunk checkpoints and audio outputs. Text, TXT, EPUB
 chapter selection and bounded FanFiction.net chapter import are implemented. A
 durable server-owned queue is implemented behind a synthesis/encoding adapter.
-Real Kokoro narration and encoding are reserved for issue #4; the default app
-keeps submitted jobs queued until that backend is provided. Playback remains a
-later issue.
+Local CPU Kokoro narration and FFmpeg export are available after explicit model
+setup (issue #4). Without setup, jobs remain queued. The persistent library and
+chapter player remain issue #5 work.
 
 Use Python **3.11 or 3.12** and [uv](https://docs.astral.sh/uv/). From the repository
 root, install the locked dependencies in the project's `.venv`:
@@ -81,6 +81,7 @@ the application does **not** automatically load `.env` files:
 | `CHAPTERCAST_HOST` | `127.0.0.1` | Loopback bind address; non-loopback values are rejected. |
 | `CHAPTERCAST_PORT` | `8000` | Local TCP port, 1–65535. |
 | `CHAPTERCAST_DATA_DIR` | `.runtime` | Private data directory, relative to the working directory or absolute. |
+| `CHAPTERCAST_INFERENCE_THREADS` | `4` | CPU inference threads, restricted to 1–4; one interop thread. |
 
 Startup creates `metadata.sqlite3`, `uploads/`, `models/` and `audio/` beneath the
 data directory. Schema version 2 uses SQLite foreign keys, constrained job
@@ -97,8 +98,7 @@ commit real chapter contents or device/host/authentication details. The tests us
 only original, labelled synthetic text, EPUB and HTML fixtures.
 
 Private Tailscale hosting and service activation are reserved for issue #8. These
-development commands do not configure Serve, Funnel or any live service. Later
-issues will add model-download and deployment instructions. Use content you are
+development commands do not configure Serve, Funnel or any live service. Model setup is documented below; deployment instructions remain later work. Use content you are
 entitled to process; this application does not redistribute imported works.
 
 ## Chapter import (issue #2)
@@ -108,7 +108,8 @@ upload, an EPUB upload or a supported FanFiction.net URL. EPUB upload first list
 chapters in spine reading order; select one and press **Import selected chapter**.
 Only that chapter is saved. Imported metadata shown in the shell is for the
 current browser session; the persistent library is reserved for issue #5.
-Imports do not enqueue narration jobs.
+Imports do not automatically enqueue narration jobs. **Generate audio** submits
+a chapter using the voice and speed selected in the preview controls.
 
 Blank lines preserve text paragraph boundaries; single line breaks remain within
 paragraphs. HTML block elements become paragraphs and `<br>` becomes a line break.
@@ -251,16 +252,91 @@ live worker's reservation before it settles. These are generation quotas, not
 quotas on import uploads or model downloads. No automatic deletion of private library data is
 implemented; a full history requires deliberate local maintenance while stopped.
 
-`GET /api/jobs/worker` reports `backend_ready` and `worker_owned`. In this issue
-`backend_ready` is false for the default application: jobs persist but real
-narration is unavailable. Issue #4 will provide the `Backend` adapter in
-`worker.py`, honouring cooperative cancellation, write budgets and bounded model
-and encoding operations. It must encode directly from the ordered WAV
-checkpoints or a bounded stream, without creating a second full-size concatenated
-PCM copy on disk. `max_bytes` covers peak additional disk usage across all output
-destinations and temporary work combined; the worker has already subtracted the
-existing checkpoints from the remaining encoding budget. Its pipeline version
-must change when model/rendering behaviour changes. Queue tests use labelled
-synthetic tones with real FFmpeg; they establish queue/validation behaviour, not
-live TTS, physical-phone behaviour
-or deployment acceptance.
+`GET /api/jobs/worker` reports `backend_ready` and `worker_owned`. The default
+application enables real narration only when the optional TTS dependencies,
+FFmpeg/ffprobe, pinned model provenance and all model/voice hashes are present.
+Otherwise jobs remain queued and the preview route returns `backend_unavailable`.
+`backend_ready` means setup was verified, not that any particular job succeeded.
+
+## Local narration and export (issue #4)
+
+Install in the existing project `.venv`, with Python 3.11 or 3.12:
+
+```sh
+export UV_CACHE_DIR="$PWD/.runtime/uv-cache"
+export UV_PYTHON_DOWNLOADS=never
+uv sync --locked --extra dev --extra tts --python 3.11
+HF_HOME="$PWD/.runtime/models/hub" HF_HUB_DISABLE_XET=1 uv run --locked --extra tts chaptercast-models
+uv run --locked --extra tts chaptercast
+```
+
+Use the existing absolute uv executable if it is absent from PATH. Installation
+requires PyPI, the official PyTorch CPU index and the spaCy GitHub release;
+explicit model setup requires Hugging Face. Cached runs can set `UV_OFFLINE=1`
+to prevent uv from revalidating remote dependency metadata. Keep `--extra tts`
+on narration commands. The standard unit/API test command remains
+`uv run --extra dev pytest -q`; it needs neither models nor the TTS extra.
+
+The TTS extra pins Kokoro 0.9.4, Misaki 0.9.4, PyTorch 2.6.0 and Transformers
+4.51.3, with the spaCy `en_core_web_sm` 3.8.0 model. Linux/Windows use the explicit
+CPU PyTorch index rather than CUDA wheels. Misaki includes an espeak-ng library;
+no system espeak installation or GPU runtime is needed. Setup downloads only
+`config.json`, Kokoro v1.0 weights and four British voices from
+[hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M/tree/f3ff3571791e39611d31c381e3a41a3af07b4987),
+revision `f3ff3571791e39611d31c381e3a41a3af07b4987`. Source, revision, package
+versions, sizes and SHA256 hashes are recorded privately in
+`.runtime/models/provenance.json`. Set up again if files are damaged. No model
+or voice is tracked in Git. Generation uses these local files with Hugging Face
+and Transformers offline; the browser never downloads a model.
+
+The British preview defaults to `bf_emma`. Choose another supported British voice
+or speed 0.5–2.0, then generate the original labelled sample. The preview uses the
+same durable queue, limits, checkpoints and output validation as chapters:
+`POST /api/jobs/preview` accepts optional `voice`, `speed`, `formats` and returns
+HTTP 202 with a job. Poll/download/cancel with the existing job routes. Repeated
+previews reuse one private sample chapter and the normal settings/content cache.
+The shell can play the short preview and download completed chapter exports;
+a persistent library and chapter player are reserved for issue #5.
+
+One reusable spawned process performs inference on CPU, with at most four
+inference threads and one interop thread. The parent checks cancellation and
+job deadlines every 50 ms while a model call is in flight. Cancellation/shutdown
+terminates that child, removes the partial WAV and keeps already committed
+checkpoints. A later attempt starts a fresh child and resumes missing chunks.
+Model load/synthesis and each encoding operation have a 120-second deadline,
+in addition to the queue's 1,800-second attempt limit. No hardware settings change.
+
+Every Kokoro yield for each input chunk is written as mono 24 kHz PCM16, in
+order. The adapter checks that all non-whitespace input characters occur in the
+yielded graphemes, in order; skipped/truncated text, empty or nonfinite audio,
+oversized or overlong chunks fail without publishing. This structural coverage
+check does not assess pronunciation or replace listening. Text interpreted by
+Kokoro as markup may fail that strict coverage check; use plain narration text.
+The rendering identity has changed from `queue-v1`, so synthetic/stale jobs cannot
+be live narration cache hits. Older unfinished jobs fail with `generation_failed`
+on an unsupported pipeline; resubmit them with current settings.
+
+FFmpeg's concat demuxer reads the ordered WAV checkpoints. There is no second
+full-length PCM file. A small temporary path manifest and all requested encoded
+files share the remaining `max_bytes` budget; output is streamed from FFmpeg in
+bounded blocks and checked **before** each disk write. Failure/cancellation
+kills FFmpeg and removes the manifest and outputs. Opus uses mono `libopus` at
+32 kbps with CBR; M4A uses mono AAC at nominal 48 kbps. M4A has an early `moov`
+and one-second MP4 fragments so it can be streamed without a seekable second
+copy. Specific browser/player compatibility remains issue #5/#6 acceptance.
+
+Run the opt-in real acceptance harness after model setup:
+
+```sh
+uv run --locked --extra dev --extra tts python scripts/verify_tts.py
+```
+
+It generates a British preview through the real API and a complete original
+multi-paragraph chapter in both formats. It records wall time, input/chunk/yield
+coverage, ffprobe duration/size/codec, full-decode duration and exact output paths
+in ignored `.evidence/issue-4/acceptance.json`. It also interrupts the real adapter
+during inference, verifies cancellation keeps outputs hidden, and verifies an
+interrupted job resumes without regenerating its intact first checkpoint.
+Generated audio and input live under a fresh ignored timestamp directory.
+This is explicit local integration evidence, not CI, browser rendering,
+physical-phone behaviour, controller acceptance, issue closure or deployment.

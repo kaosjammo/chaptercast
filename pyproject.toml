@@ -16,10 +16,27 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["httpx>=0.27,<1", "pytest>=8,<10"]
+dev = ["httpx>=0.27,<1", "pytest>=8,<10", "numpy>=1.26,<3"]
+tts = [
+    "kokoro==0.9.4", "misaki[en]==0.9.4", "torch==2.6.0",
+    "transformers==4.51.3", "spacy>=3.8,<3.9",
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+]
 
 [project.scripts]
 chaptercast = "chaptercast.__main__:main"
+chaptercast-models = "chaptercast.tts:setup_models"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chaptercast"]

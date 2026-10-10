@@ -105,7 +105,13 @@ class Worker:
         except Exception:
             self.last_error = "worker_failed"
         finally:
+            self._close_backend()
             self._release()
+
+    def _close_backend(self):
+        close = getattr(self.backend, "close", None)
+        if close is not None:
+            close()
 
     def run_once(self) -> bool:
         """Bounded synchronous foreground helper, also protected by the process lock."""
@@ -117,6 +123,7 @@ class Worker:
                 self._recover()
                 return self._run_once()
             finally:
+                self._close_backend()
                 self._release()
 
     @contextmanager

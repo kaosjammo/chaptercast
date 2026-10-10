@@ -15,6 +15,7 @@ from chaptercast.imports import ImportFailure
 from chaptercast.job_api import router as job_router
 from chaptercast.jobs import JobFailure, JobStore
 from chaptercast.worker import Backend, Worker
+from chaptercast.tts import available_backend
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -29,7 +30,9 @@ def create_app(settings: Settings | None = None, *, backend: Backend | None = No
             (settings.data_dir / name).mkdir(mode=0o700, exist_ok=True)
         initialise(settings.data_dir / "metadata.sqlite3")
         app.state.jobs = JobStore(settings.data_dir)
-        app.state.worker = Worker(app.state.jobs, backend)
+        narration = backend if backend is not None else await run_in_threadpool(
+            available_backend, settings.data_dir / "models", settings.inference_threads)
+        app.state.worker = Worker(app.state.jobs, narration)
         await run_in_threadpool(app.state.worker.start)
         try:
             yield
