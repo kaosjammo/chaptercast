@@ -1,7 +1,7 @@
 """Bounded submission and polling; requests never own generation execution."""
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from starlette.concurrency import run_in_threadpool
 import json
 
@@ -49,6 +49,12 @@ def worker_status(request: Request):
 @router.get("/{identifier}")
 def job(identifier: int, request: Request):
     return request.app.state.jobs.get(identifier)
+
+
+@router.delete("/{identifier}", status_code=204)
+def delete(identifier: int, request: Request):
+    request.app.state.jobs.delete(identifier)
+    return Response(status_code=204)
 
 
 @router.post("/{identifier}/cancel")

@@ -1,140 +1,133 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light dark">
-    <meta name="theme-color" content="#305843">
-    <title>ChapterCast</title>
-    <link rel="manifest" href="/static/manifest.webmanifest">
-    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
-    <link rel="stylesheet" href="/static/style.css">
-    <script src="/static/media-session.js" defer></script>
-    <script src="/static/app.js" defer></script>
-  </head>
-  <body>
-    <main>
-      <header>
-        <p class="eyebrow">Your local listening library</p>
-        <h1>ChapterCast</h1>
-        <p>Turn chapters into audio, at your own pace.</p>
-        <nav aria-label="Main"><a href="#library-heading">Library</a><a href="#import-heading">Import</a><a href="#voice-heading">Voice preview</a></nav>
-      </header>
-      <section aria-labelledby="offline-heading">
-        <h2 id="offline-heading">Install and listen offline</h2>
-        <p id="shell-status" role="status">Preparing the offline shell…</p>
-        <p id="offline-status" role="status" hidden></p>
-        <p id="offline-limits" class="hint">Only the app interface is saved offline. Library updates, imports, generation, streaming and new downloads need the server. Nothing submitted offline is queued or retried automatically.</p>
-        <p class="hint">On Android, use your browser’s Install app or Add to Home screen option when offered. Download M4A for broad player compatibility, or Opus if your player supports it. Wait for the browser’s download to finish, then open the saved file from Downloads in your audio player. Downloaded files stay on your device; buffered streaming is not an offline download.</p>
-      </section>
-      <section aria-labelledby="player-heading" id="player-section" hidden>
-        <h2 id="player-heading">Chapter player</h2>
-        <h3 id="player-title"></h3>
-        <p class="hint">Streaming needs this server. Download a complete file for playback in a separate player without server connectivity.</p>
-        <audio id="chapter-player" controls preload="metadata"></audio>
-        <div class="actions">
-          <button id="player-toggle" type="button" disabled>Play</button>
-          <button id="skip-back" type="button" disabled>Back 15 seconds</button>
-          <button id="skip-forward" type="button" disabled>Forward 15 seconds</button>
-        </div>
-        <label for="seek">Chapter position</label>
-        <input id="seek" type="range" min="0" max="1" step="0.1" value="0" disabled>
-        <p id="player-time" class="hint">Loading duration…</p>
-        <div class="settings-row">
-          <div><label for="playback-rate">Playback speed</label>
-            <select id="playback-rate">
-              <option value="0.5">0.5×</option><option value="0.75">0.75×</option>
-              <option value="1" selected>1×</option><option value="1.25">1.25×</option>
-              <option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
-            </select>
-          </div>
-          <div><label for="playback-format">Audio format</label><select id="playback-format"></select></div>
-        </div>
-        <p id="player-status" role="status" aria-live="polite"></p>
-        <p id="position-status" class="hint" role="status">Position and playback speed are saved per chapter in this browser.</p>
-        <div id="player-downloads" class="actions"></div>
-      </section>
-      <section aria-labelledby="library-heading">
-        <div class="section-heading"><h2 id="library-heading">Library</h2><button id="refresh-library" type="button">Refresh library</button></div>
-        <p class="hint">Chapters and generation jobs are stored privately on this server. Generate with the voice and narration speed selected below.</p>
-        <p id="library-status" role="status" aria-live="polite">Loading library…</p>
-        <ul id="library-list" class="cards"></ul>
-        <div class="actions"><button id="library-previous" type="button" disabled>Previous page</button><span id="library-page"></span><button id="library-next" type="button" disabled>Next page</button></div>
-      </section>
-      <section aria-labelledby="queue-heading">
-        <h2 id="queue-heading">Generation queue</h2>
-        <p id="worker-status" class="hint"></p>
-        <p class="hint">Progress counts synthesised chunks. At 100%, encoding and validation may still be running. Closing this page does not cancel a job.</p>
-        <ul id="queue-list" class="cards"></ul>
-        <p id="queue-empty">No active jobs.</p>
-        <p id="generation-status" role="status" aria-live="polite"></p>
-      </section>
-      <section aria-labelledby="voice-heading">
-        <h2 id="voice-heading">British voice preview</h2>
-        <p>An original short sample, generated locally with the same settings as a chapter.</p>
-        <form id="preview-form">
-          <label for="voice">Voice</label>
-          <select id="voice">
-            <option value="bf_emma">Emma (British, default)</option>
-            <option value="bf_isabella">Isabella (British)</option>
-            <option value="bm_george">George (British)</option>
-            <option value="bm_lewis">Lewis (British)</option>
-          </select>
-          <label for="speed">Narration speed (0.5–2)</label>
-          <input id="speed" type="number" min="0.5" max="2" step="0.05" value="1" required>
-          <button id="preview-submit" type="submit">Generate preview</button>
-        </form>
-        <p id="preview-status" role="status" aria-live="polite">Generate a sample to hear the selected voice.</p>
-        <audio id="voice-preview" controls preload="none" hidden></audio>
-        <div id="generation-downloads"></div>
-      </section>
-      <section aria-labelledby="import-heading">
-        <h2 id="import-heading">Import a chapter</h2>
-        <p>Paste text, upload UTF-8 TXT or choose a chapter from an EPUB. FFN may block URL imports; paste and upload remain available.</p>
-        <form id="import-form">
-          <label for="import-source">Source</label>
-          <select id="import-source">
-            <option value="text">Pasted text</option>
-            <option value="upload">TXT or EPUB upload</option>
-            <option value="url">FanFiction.net chapter URL</option>
-          </select>
-          <label for="import-title">Title (optional)</label>
-          <input id="import-title" type="text" maxlength="200">
-          <div id="text-fields">
-            <label for="chapter-text">Chapter text</label>
-            <textarea id="chapter-text" rows="10" aria-describedby="text-limit"></textarea>
-            <p id="text-limit" class="hint">Up to 1 MiB of UTF-8 text. Blank lines separate paragraphs.</p>
-          </div>
-          <div id="upload-fields" hidden>
-            <label for="chapter-file">TXT or EPUB file</label>
-            <input id="chapter-file" type="file" accept=".txt,.epub">
-            <p class="hint">TXT: 1 MiB. EPUB: 10 MiB; choose one chapter after upload.</p>
-            <div id="epub-fields" hidden>
-              <label for="epub-chapter">EPUB chapter in reading order</label>
-              <select id="epub-chapter"></select>
-            </div>
-          </div>
-          <div id="url-fields" hidden>
-            <label for="chapter-url">HTTPS FanFiction.net chapter URL</label>
-            <input id="chapter-url" type="url" maxlength="512" placeholder="https://www.fanfiction.net/s/story/chapter/title">
-          </div>
-          <label class="checkbox"><input id="exclude-notes" type="checkbox"> Exclude recognised author notes and EPUB footnotes</label>
-          <p class="hint">Removes paragraphs starting “A/N:” or “Author’s Note:” and marked EPUB notes. Unlabelled notes remain; check your source before importing.</p>
-          <button id="import-submit" type="submit">Import chapter</button>
-        </form>
-        <p id="import-status" role="status" aria-live="polite"></p>
-        <div id="ffn-fallback" hidden>
-          <p>FanFiction.net blocked this request. No chapter was imported.</p>
-          <button id="fallback-paste" type="button">Paste text instead</button>
-          <button id="fallback-upload" type="button">Upload TXT or EPUB instead</button>
-        </div>
-      </section>
-      <section aria-labelledby="connection-heading">
-        <h2 id="connection-heading">Server connection</h2>
-        <p id="connection-status" role="status" aria-live="polite">Checking connection…</p>
-        <button id="check-connection" type="button">Check connection</button>
-        <noscript><p>Enable JavaScript to check the connection, or visit <a href="/health">server health</a>.</p></noscript>
-      </section>
-    </main>
-  </body>
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<meta content="light dark" name="color-scheme"/>
+<meta content="#305843" name="theme-color"/>
+<title>ChapterCast</title>
+<link href="/static/manifest.webmanifest" rel="manifest"/>
+<link href="/static/icons/icon-192.png" rel="icon" type="image/png"/>
+<link href="/static/style.css" rel="stylesheet"/>
+<script defer="" src="/static/media-session.js"></script>
+<script defer="" src="/static/app.js"></script>
+</head>
+<body>
+<main><header class="app-header">
+<div class="brand"><h1>ChapterCast</h1><details id="help"><summary>Help &amp; connection</summary><div id="help-content"><section aria-labelledby="offline-heading">
+<h2 id="offline-heading">Install and listen offline</h2>
+<p id="shell-status" role="status">Preparing the offline shell…</p>
+
+<p class="hint" id="offline-limits">Only the app interface is saved offline. Library updates, imports, generation, streaming and new downloads need the server. Nothing submitted offline is queued or retried automatically.</p>
+<p class="hint">On Android, use your browser’s Install app or Add to Home screen option when offered. Download M4A for broad player compatibility, or Opus if your player supports it. Wait for the browser’s download to finish, then open the saved file from Downloads in your audio player. Downloaded files stay on your device; buffered streaming is not an offline download.</p>
+</section><section aria-labelledby="connection-heading">
+<h2 id="connection-heading">Server connection</h2>
+<p aria-live="polite" id="connection-status" role="status">Checking connection…</p>
+<button id="check-connection" type="button">Check connection</button>
+<noscript><p>Enable JavaScript to check the connection, or visit <a href="/health">server health</a>.</p></noscript>
+</section></div></details></div>
+<nav aria-label="Workspace" role="tablist"><button aria-controls="view-library" aria-selected="true" id="tab-library" role="tab" type="button">Library</button><button aria-controls="view-generate" aria-selected="false" id="tab-generate" role="tab" tabindex="-1" type="button">Generate</button><button aria-controls="view-activity" aria-selected="false" id="tab-activity" role="tab" tabindex="-1" type="button">Activity <span hidden="" id="activity-count"></span></button></nav>
+<p hidden="" id="offline-status" role="status"></p><p hidden="" id="shell-update" role="status">New interface available. Reload when ready: unsaved input resets and playback stops. <button id="reload-shell" type="button">Reload interface</button></p>
+</header><div hidden="" id="active-progress"><button id="show-activity" type="button">View activity</button><div><p id="active-label"></p><progress aria-labelledby="active-label" id="active-bar" max="1" value="0"></progress></div></div>
+<div class="workspace" id="workspace"><section aria-labelledby="tab-library" id="view-library" role="tabpanel" tabindex="0"><section aria-labelledby="library-heading" class="view-content">
+<div class="section-heading"><h2 id="library-heading">Library</h2><button id="refresh-library" type="button">Refresh</button></div>
+
+<p aria-live="polite" id="library-status" role="status">Loading library…</p>
+<ul class="cards" id="library-list"></ul>
+<div class="actions"><button disabled="" id="library-previous" type="button">Previous page</button><span id="library-page"></span><button disabled="" id="library-next" type="button">Next page</button></div>
+</section></section><section aria-labelledby="tab-generate" hidden="" id="view-generate" role="tabpanel" tabindex="0"><h2>Generate</h2><p class="hint">Import a chapter, then generate from your library using these voice settings.</p><section aria-labelledby="import-heading" class="view-content">
+<h2 id="import-heading">Import a chapter</h2>
+<p>Paste text, upload UTF-8 TXT or choose a chapter from an EPUB. FFN may block URL imports; paste and upload remain available.</p>
+<form id="import-form">
+<label for="import-source">Source</label>
+<select id="import-source">
+<option value="text">Pasted text</option>
+<option value="upload">TXT or EPUB upload</option>
+<option value="url">FanFiction.net chapter URL</option>
+</select>
+<label for="import-title">Title (optional)</label>
+<input id="import-title" maxlength="200" type="text"/>
+<div id="text-fields">
+<label for="chapter-text">Chapter text</label>
+<textarea aria-describedby="text-limit" id="chapter-text" rows="5"></textarea>
+<p class="hint" id="text-limit">Up to 1 MiB of UTF-8 text. Blank lines separate paragraphs.</p>
+</div>
+<div hidden="" id="upload-fields">
+<label for="chapter-file">TXT or EPUB file</label>
+<input accept=".txt,.epub" id="chapter-file" type="file"/>
+<p class="hint">TXT: 1 MiB. EPUB: 10 MiB; choose one chapter after upload.</p>
+<div hidden="" id="epub-fields">
+<label for="epub-chapter">EPUB chapter in reading order</label>
+<select id="epub-chapter"></select>
+</div>
+</div>
+<div hidden="" id="url-fields">
+<label for="chapter-url">HTTPS FanFiction.net chapter URL</label>
+<input id="chapter-url" maxlength="512" placeholder="https://www.fanfiction.net/s/story/chapter/title" type="url"/>
+</div>
+<label class="checkbox"><input id="exclude-notes" type="checkbox"/> Exclude recognised author notes and EPUB footnotes</label>
+<p class="hint">Removes paragraphs starting “A/N:” or “Author’s Note:” and marked EPUB notes. Unlabelled notes remain; check your source before importing.</p>
+<button id="import-submit" type="submit">Import chapter</button>
+</form>
+<p aria-live="polite" id="import-status" role="status"></p>
+<div hidden="" id="ffn-fallback">
+<p>FanFiction.net blocked this request. No chapter was imported.</p>
+<button id="fallback-paste" type="button">Paste text instead</button>
+<button id="fallback-upload" type="button">Upload TXT or EPUB instead</button>
+</div>
+</section><details id="voice-settings"><summary>Voice &amp; narration settings</summary><section aria-labelledby="voice-heading" class="view-content">
+<h2 id="voice-heading">British voice preview</h2>
+<p>An original short sample, generated locally with the same settings as a chapter.</p>
+<form id="preview-form">
+<label for="voice">Voice</label>
+<select id="voice">
+<option value="bf_emma">Emma (British, default)</option>
+<option value="bf_isabella">Isabella (British)</option>
+<option value="bm_george">George (British)</option>
+<option value="bm_lewis">Lewis (British)</option>
+</select>
+<label for="speed">Narration speed (0.5–2)</label>
+<input id="speed" max="2" min="0.5" required="" step="0.05" type="number" value="1"/>
+<button id="preview-submit" type="submit">Generate preview</button>
+</form>
+<p aria-live="polite" id="preview-status" role="status">Generate a sample to hear the selected voice.</p>
+<audio controls="" hidden="" id="voice-preview" preload="none"></audio>
+<div id="generation-downloads"></div>
+</section></details></section><section aria-labelledby="tab-activity" hidden="" id="view-activity" role="tabpanel" tabindex="0"><section aria-labelledby="queue-heading" class="view-content">
+<h2 id="queue-heading">Activity</h2>
+<p class="hint" id="worker-status"></p>
+<p class="hint">Progress counts synthesised chunks. At 100%, encoding and validation may still be running. Closing this page does not cancel a job.</p>
+<ul class="cards" id="queue-list"></ul>
+<p id="queue-empty">No generations yet.</p>
+<p aria-live="polite" id="generation-status" role="status"></p>
+</section></section></div><section aria-labelledby="player-heading" class="player" hidden="" id="player-section">
+<h2 class="visually-hidden" id="player-heading">Chapter player</h2><div class="player-top"><h3 id="player-title" tabindex="-1"></h3><div class="actions">
+<button disabled="" id="player-toggle" type="button">Play</button>
+<button aria-label="Back 15 seconds" disabled="" id="skip-back" type="button">−15s</button>
+<button aria-label="Forward 15 seconds" disabled="" id="skip-forward" type="button">+15s</button>
+</div></div>
+
+
+<audio hidden="" id="chapter-player" preload="metadata"></audio>
+
+<label class="visually-hidden" for="seek">Chapter position</label>
+<input disabled="" id="seek" max="1" min="0" step="0.1" type="range" value="0"/>
+<p class="player-time" id="player-time">Loading duration…</p>
+
+<p aria-live="polite" class="player-feedback" id="player-status" role="status"></p>
+
+
+<details id="player-more"><summary>Speed, format &amp; downloads</summary><div class="settings-row">
+<div><label for="playback-rate">Playback speed</label>
+<select id="playback-rate">
+<option value="0.5">0.5×</option><option value="0.75">0.75×</option>
+<option selected="" value="1">1×</option><option value="1.25">1.25×</option>
+<option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
+</select>
+</div>
+<div><label for="playback-format">Audio format</label><select id="playback-format"></select></div>
+</div><p class="hint" id="position-status" role="status">Position and playback speed are saved per chapter in this browser.</p><div class="actions" id="player-downloads"></div></details></section>
+<dialog aria-describedby="delete-description" aria-labelledby="delete-heading" id="delete-dialog"><form method="dialog"><h2 id="delete-heading">Delete this generation?</h2><p id="delete-description"></p><p class="hint">Chapter text and other generations stay. This removes server audio and checkpoints; files already saved to your device stay there.</p><div class="actions"><button autofocus="" id="delete-dismiss" type="button">Keep generation</button><button id="delete-confirm" type="button">Delete generation</button></div><p id="delete-status" role="status"></p></form></dialog></main>
+</body>
 </html>

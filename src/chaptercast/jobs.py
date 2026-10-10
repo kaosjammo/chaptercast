@@ -6,6 +6,7 @@ import json
 import math
 from pathlib import Path
 import sqlite3
+import shutil
 
 from chaptercast.chunks import split_chunks
 from chaptercast.database import connect
@@ -138,10 +139,13 @@ class JobStore:
                 raise JobFailure("quota", "The active job quota is full.", 429)
             if reserved + self.limits.job_bytes > self.limits.storage_bytes:
                 raise JobFailure("quota", "The generation storage quota is full.", 429)
-            identifier = db.execute("""INSERT INTO jobs
-                (chapter_id, content_key, voice_key, settings_key, cache_key, settings_json, total_chunks)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (chapter_id, content_key, voice_key, settings_key, cache_key, settings_json, len(chunks))).lastrowid
+            # Keep a durable high-water mark: SQLite otherwise reuses deleted IDs.
+            identifier = db.execute("SELECT max(last_id, coalesce((SELECT max(id) FROM jobs), 0)) + 1 FROM generation_sequence WHERE singleton=1").fetchone()[0]
+            db.execute("UPDATE generation_sequence SET last_id=? WHERE singleton=1", (identifier,))
+            db.execute("""INSERT INTO jobs
+                (id, chapter_id, content_key, voice_key, settings_key, cache_key, settings_json, total_chunks)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (identifier, chapter_id, content_key, voice_key, settings_key, cache_key, settings_json, len(chunks)))
             db.executemany("INSERT INTO job_chunks (job_id, position, text, content_key) VALUES (?, ?, ?, ?)",
                            [(identifier, i, chunk, digest(chunk.encode())) for i, chunk in enumerate(chunks)])
             db.execute("INSERT INTO chapter_jobs (chapter_id, job_id) VALUES (?, ?)", (chapter_id, identifier))
@@ -149,11 +153,15 @@ class JobStore:
 
     def _get(self, db, identifier: int) -> dict:
         job = db.execute("""SELECT id, chapter_id, status, content_key, voice_key, settings_key, cache_key,
-            total_chunks, completed_chunks, error, created_at, started_at, finished_at, settings_json
+            total_chunks, completed_chunks, error, created_at, started_at, finished_at, settings_json, owner
             FROM jobs WHERE id = ?""", (identifier,)).fetchone()
         if job is None:
             raise JobFailure("missing_job", "Job does not exist.", 404)
         result = dict(job)
+        owner = result.pop("owner")
+        result["deletable"] = result["status"] in {"completed", "cancelled", "failed"} and owner is None
+        result["chapter_ids"] = [row[0] for row in db.execute("SELECT chapter_id FROM chapter_jobs WHERE job_id=? ORDER BY chapter_id", (identifier,))]
+        result["linked_chapters"] = len(result["chapter_ids"])
         settings = json.loads(result.pop("settings_json") or "{}")
         result["voice"] = settings.get("voice")
         result["speed"] = settings.get("speed")
@@ -221,6 +229,70 @@ class JobStore:
             db.execute("""UPDATE jobs SET status = 'cancelled', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
                 WHERE id = ? AND status IN ('queued','running')""", (identifier,))
             return self._get(db, identifier)
+
+    def delete(self, identifier: int) -> None:
+        """Remove one terminal generation; never follow metadata to other files.
+
+        The write transaction excludes worker claims/recovery/publication and
+        admission. An owner stays set until all worker filesystem writes stop.
+        Filesystem failure retains metadata and reports incomplete cleanup for
+        retry; missing files from an earlier attempt are harmless.
+        """
+        try:
+            with connect(self.database) as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute("SELECT status, owner, cache_key, settings_json FROM jobs WHERE id=?", (identifier,)).fetchone()
+                if row is None:
+                    raise JobFailure("missing_job", "Generation does not exist. It may already have been deleted.", 404)
+                if row[0] not in {"completed", "cancelled", "failed"} or row[1] is not None:
+                    raise JobFailure("job_active", "Cancel active generation first, then wait for the worker to stop before deleting.", 409)
+                directories = [self.root / "audio" / area / str(identifier) for area in (".work", "ready")]
+                # Reject symlinked parents as well as a symlinked job directory.
+                # rmtree itself never follows symlinks nested inside the bundle.
+                for directory in directories:
+                    for part in (directory.parent.parent, directory.parent, directory):
+                        if part.is_symlink() or (part.exists() and not part.is_dir()):
+                            raise JobFailure("invalid_path", "Generation artifact path is invalid.", 409)
+                    if directory.resolve() != directory:
+                        raise JobFailure("invalid_path", "Generation artifact path is invalid.", 409)
+                references, legacy_files = [], []
+                for relative, format, sha256 in db.execute("SELECT path, format, sha256 FROM audio_outputs WHERE job_id=?", (identifier,)):
+                    path = self.root / relative
+                    # Schema-v1 exports were leaf files directly under audio.
+                    # Retain this bounded legacy layout, never arbitrary stored
+                    # paths or bundles. New jobs only own their numbered bundle.
+                    if row[2] is None and row[3] is None and sha256 is None and path.parent == self.root / "audio" and path.suffix == f".{format}":
+                        if path.is_symlink() or path.resolve() != path or (path.exists() and not path.is_file()):
+                            raise JobFailure("invalid_path", "Generation artifact path is invalid.", 409)
+                        legacy_files.append(path)
+                    else:
+                        references.append((relative, directories[1]))
+                references += [(path, directories[0]) for (path,) in db.execute("SELECT path FROM job_chunks WHERE job_id=? AND path IS NOT NULL", (identifier,))]
+                for relative, directory in references:
+                    path = self.root / relative
+                    if not path.is_relative_to(directory) or path.resolve() != path or path == directory:
+                        raise JobFailure("invalid_path", "Generation artifact path is invalid.", 409)
+                # Do not remove a bundle referenced by another job, even if
+                # damaged metadata has violated the worker's ownership layout.
+                for (relative,) in db.execute("SELECT path FROM audio_outputs WHERE job_id != ? UNION ALL SELECT path FROM job_chunks WHERE job_id != ? AND path IS NOT NULL", (identifier, identifier)):
+                    other_path = (self.root / relative).resolve()
+                    if other_path in legacy_files or any(other_path.is_relative_to(directory) for directory in directories):
+                        raise JobFailure("invalid_path", "Generation artifact is shared unexpectedly.", 409)
+                for directory in directories:
+                    if directory.exists():
+                        shutil.rmtree(directory)
+                for path in legacy_files:
+                    path.unlink(missing_ok=True)
+                for table in ("audio_outputs", "job_chunks", "chapter_jobs"):
+                    db.execute(f"DELETE FROM {table} WHERE job_id=?", (identifier,))
+                db.execute("UPDATE generation_sequence SET last_id=max(last_id, ?) WHERE singleton=1", (identifier,))
+                db.execute("DELETE FROM jobs WHERE id=?", (identifier,))
+        except (RuntimeError, ValueError, TypeError) as exc:
+            raise JobFailure("invalid_path", "Generation artifact path is invalid.", 409) from exc
+        except OSError as exc:
+            raise JobFailure("cleanup_failed", "Cleanup is incomplete. Generation metadata was retained; retry deletion.", 503) from exc
+        except sqlite3.OperationalError as exc:
+            raise JobFailure("cleanup_busy", "Generation cleanup is unavailable or busy. Refresh and retry.", 503) from exc
 
     def output(self, identifier: int, format: str) -> Path:
         with connect(self.database) as db:

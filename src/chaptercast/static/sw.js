@@ -1,7 +1,7 @@
 "use strict";
 
 // Bump this version whenever the shell changes. Never add private/API/audio URLs.
-const SHELL_CACHE = "chaptercast-shell-v3";
+const SHELL_CACHE = "chaptercast-shell-v4";
 const SHELL_PATHS = ["/", "/static/style.css", "/static/app.js",
   "/static/media-session.js", "/static/manifest.webmanifest",
   "/static/icons/icon-192.png", "/static/icons/icon-512.png", "/static/icons/icon-maskable-512.png"];
@@ -18,7 +18,14 @@ async function publicShell(path) {
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL_CACHE);
-    for (const path of SHELL_PATHS) await cache.put(path, await publicShell(path));
+    try {
+      for (const path of SHELL_PATHS) await cache.put(path, await publicShell(path));
+    } catch (error) {
+      // A failed install must not activate a partial shell or disturb the
+      // previous version controlling existing clients. Retry on next update.
+      await caches.delete(SHELL_CACHE);
+      throw error;
+    }
     await self.skipWaiting();
   })());
 });

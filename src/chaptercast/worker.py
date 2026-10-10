@@ -284,11 +284,12 @@ class Worker:
                     path = (ready / destinations[format].name).relative_to(self.store.root).as_posix()
                     db.execute("""INSERT INTO audio_outputs (job_id, format, path, duration_seconds, byte_size, sha256)
                         VALUES (?, ?, ?, ?, ?, ?)""", (identifier, format, path, info.duration_seconds, info.byte_size, info.sha256))
-                db.execute("""UPDATE jobs SET status = 'completed', owner = NULL, artifact_bytes = ?,
+                db.execute("""UPDATE jobs SET status = 'completed', artifact_bytes = ?,
                     finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?""", (self._bytes(identifier), identifier))
-            shutil.rmtree(work, ignore_errors=True)
             with self._db() as db:
-                db.execute("UPDATE jobs SET artifact_bytes = ? WHERE id = ?", (self._bytes(identifier), identifier))
+                db.execute("BEGIN IMMEDIATE")
+                shutil.rmtree(work, ignore_errors=True)
+                db.execute("UPDATE jobs SET owner = NULL, artifact_bytes = ? WHERE id = ?", (self._bytes(identifier), identifier))
         except Interrupted:
             self._finish(identifier, "queued", None)
         except Exception:

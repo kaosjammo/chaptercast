@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Iterator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS chapters (
     id INTEGER PRIMARY KEY,
@@ -105,6 +105,16 @@ INSERT INTO chapter_jobs (chapter_id, job_id) SELECT chapter_id, id FROM jobs;
 """
 
 
+MIGRATION_V4 = """
+CREATE TABLE IF NOT EXISTS generation_sequence (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    last_id INTEGER NOT NULL CHECK (last_id >= 0)
+);
+INSERT OR IGNORE INTO generation_sequence (singleton, last_id) VALUES (1, 0);
+UPDATE generation_sequence SET last_id = max(last_id, coalesce((SELECT max(id) FROM jobs), 0));
+"""
+
+
 @contextmanager
 def connect(path: Path) -> Iterator[sqlite3.Connection]:
     """Commit on success, roll back on error, and always close the connection."""
@@ -130,7 +140,9 @@ def initialise(path: Path) -> None:
             script = (SCHEMA_V1 if version == 0 else "")
             if version < 2:
                 script += MIGRATION_V2
-            script += MIGRATION_V3
+            if version < 3:
+                script += MIGRATION_V3
+            script += MIGRATION_V4
             for statement in script.split(";"):
                 if statement.strip():
                     db.execute(statement)

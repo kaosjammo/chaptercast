@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 
-function worker() {
+function worker({failPath} = {}) {
   const handlers = {}, entries = new Map(), requests = [];
   let online = true;
   const cache = {put: async (key, response) => entries.set(String(key), response),
@@ -14,7 +14,7 @@ function worker() {
     delete: async name => requests.push({deleted: name})},
     fetch: async request => {
       requests.push(request);
-      if (!online) throw new Error('Offline fixture');
+      if (!online || new URL(request.url).pathname === failPath) throw new Error('Offline fixture');
       return new Response('Original public shell fixture');
     }, self: {location: {origin: 'https://example.test'},
       addEventListener: (name, handler) => handlers[name] = handler,
@@ -55,7 +55,7 @@ test('only fixed public shell GETs enter the cache, fetched without credentials'
   let activation;
   w.handlers.activate({waitUntil: p => activation = p});
   await activation;
-  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-old'}]);
+  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-old'}, {deleted: 'chaptercast-shell-v3'}]);
 });
 
 test('Media Session actions use the active media, clamp seeks, and report actual state', async () => {
@@ -91,4 +91,37 @@ test('Media Session actions use the active media, clamp seeks, and report actual
   other.duration = NaN;
   context.updateChapterCastMediaSession(other);
   assert.deepEqual(Object.keys(positions.at(-1)), []);
+});
+
+test('new shell activation removes v3 while preserving unrelated caches', async () => {
+  const w = worker();
+  let activation;
+  w.handlers.activate({waitUntil: promise => activation = promise});
+  await activation;
+  assert.deepEqual(w.requests.filter(x => x.deleted).map(x => x.deleted).sort(),
+    ['chaptercast-shell-old', 'chaptercast-shell-v3']);
+});
+
+test('clearing deleted media removes actions only for that active generation', () => {
+  const handlers = {};
+  const session = {setActionHandler: (name, fn) => handlers[name] = fn, setPositionState: () => {}};
+  const context = {navigator: {mediaSession: session}, MediaMetadata: class {constructor(data) {Object.assign(this, data);}}};
+  vm.runInNewContext(fs.readFileSync('src/chaptercast/static/media-session.js', 'utf8'), context);
+  const audio = {duration: 30, currentTime: 10, playbackRate: 1, paused: true, ended: false};
+  context.setChapterCastMediaSession(audio, 'Original deletion fixture', () => {});
+  context.clearChapterCastMediaSession({});
+  assert.equal(session.metadata.title, 'Original deletion fixture');
+  context.clearChapterCastMediaSession(audio);
+  assert.equal(session.metadata, null);
+  assert.equal(session.playbackState, 'none');
+  assert.ok(Object.values(handlers).every(handler => handler === null));
+});
+
+
+test('incomplete shell install retains the previously controlled version and never claims clients', async () => {
+  const w = worker({failPath: '/static/app.js'});
+  let install;
+  w.handlers.install({waitUntil: promise => install = promise});
+  await assert.rejects(install, /Offline fixture/);
+  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-v4'}]);
 });

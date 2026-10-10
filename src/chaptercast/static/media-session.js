@@ -38,3 +38,15 @@ function setChapterCastMediaSession(audio, title, onPlayFailure) {
   }
   updateChapterCastMediaSession(audio);
 }
+
+function clearChapterCastMediaSession(audio) {
+  if (!("mediaSession" in navigator) || audio !== chapterCastSessionAudio) return;
+  chapterCastSessionAudio = null;
+  const session = navigator.mediaSession;
+  session.metadata = null;
+  session.playbackState = "none";
+  try { session.setPositionState?.({}); } catch { /* Optional browser support. */ }
+  for (const name of ["play", "pause", "stop", "seekbackward", "seekforward", "seekto"]) {
+    try { session.setActionHandler(name, null); } catch { /* Optional action. */ }
+  }
+}
