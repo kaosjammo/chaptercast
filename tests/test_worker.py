@@ -249,7 +249,7 @@ def test_worker_rejects_an_adapter_that_exceeds_the_chunk_budget(store):
 
 def test_api_output_requires_validated_integrity(tmp_path, ffmpeg):
     backend = SyntheticBackend()
-    with TestClient(create_app(Settings(data_dir=tmp_path), backend=backend)) as client:
+    with TestClient(create_app(Settings(data_dir=tmp_path), backend=backend), base_url="http://127.0.0.1") as client:
         identifier = client.post("/api/import/text", json={"text": "Original output integrity fixture."}).json()["id"]
         job = client.post("/api/jobs", json={"chapter_id": identifier}).json()
         deadline = time.monotonic() + 5

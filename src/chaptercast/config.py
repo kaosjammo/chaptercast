@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from ipaddress import ip_address
 import os
+import re
 from pathlib import Path
 from typing import Mapping
 
@@ -13,6 +14,7 @@ class Settings:
     port: int = 8000
     data_dir: Path = field(default_factory=lambda: Path(".runtime"))
     inference_threads: int = 4
+    trusted_hosts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         try:
@@ -25,6 +27,12 @@ class Settings:
             raise ValueError("port must be between 1 and 65535")
         if type(self.inference_threads) is not int or not 1 <= self.inference_threads <= 4:
             raise ValueError("inference threads must be between 1 and 4")
+        label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+        if not isinstance(self.trusted_hosts, tuple) or any(
+            not isinstance(host, str) or len(host) > 253 or not re.fullmatch(rf"{label}(?:\.{label})*", host)
+            for host in self.trusted_hosts
+        ):
+            raise ValueError("trusted hosts must be exact lowercase hostnames without ports or wildcards")
         object.__setattr__(self, "data_dir", Path(self.data_dir).expanduser().resolve())
 
     @classmethod
@@ -39,4 +47,5 @@ class Settings:
             port=port,
             data_dir=Path(values.get("CHAPTERCAST_DATA_DIR", ".runtime")),
             inference_threads=int(values.get("CHAPTERCAST_INFERENCE_THREADS", "4")),
+            trusted_hosts=tuple(host.strip() for host in values.get("CHAPTERCAST_TRUSTED_HOSTS", "").split(",") if host.strip()),
         )

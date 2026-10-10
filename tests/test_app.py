@@ -8,7 +8,7 @@ def test_health_and_private_runtime_initialisation(tmp_path):
     root = tmp_path / "runtime"
     app = create_app(Settings(data_dir=root))
     assert not root.exists()
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
@@ -18,7 +18,7 @@ def test_health_and_private_runtime_initialisation(tmp_path):
 
 
 def test_static_shell_and_assets(tmp_path):
-    with TestClient(create_app(Settings(data_dir=tmp_path))) as client:
+    with TestClient(create_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
         response = client.get("/")
         assert response.status_code == 200
         assert "ChapterCast" in response.text

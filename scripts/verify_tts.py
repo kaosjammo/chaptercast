@@ -164,7 +164,7 @@ def run_preview(root):
     observer = backend()
     started = time.monotonic()
     # Exercise the real HTTP route, server-owned queue and download gate.
-    with TestClient(create_app(Settings(data_dir=root), backend=observer)) as client:
+    with TestClient(create_app(Settings(data_dir=root), backend=observer), base_url="http://127.0.0.1") as client:
         assert client.get('/api/jobs/worker').json()['backend_ready']
         response = client.post('/api/jobs/preview', json={'voice': 'bf_emma', 'speed': 1.0})
         assert response.status_code == 202

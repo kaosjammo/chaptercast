@@ -81,6 +81,7 @@ the application does **not** automatically load `.env` files:
 | `CHAPTERCAST_PORT` | `8000` | Local TCP port, 1–65535. |
 | `CHAPTERCAST_DATA_DIR` | `.runtime` | Private data directory, relative to the working directory or absolute. |
 | `CHAPTERCAST_INFERENCE_THREADS` | `4` | CPU inference threads, restricted to 1–4; one interop thread. |
+| `CHAPTERCAST_TRUSTED_HOSTS` | empty | Additional exact request hostnames configured privately for approved hosting; does not change loopback binding. |
 
 Startup creates `metadata.sqlite3`, `uploads/`, `models/` and `audio/` beneath the
 data directory. Schema version 3 uses SQLite foreign keys, constrained job
@@ -376,9 +377,9 @@ being unavailable removes that persistence. Storage failures show a message;
 positions are not synchronised to other devices.
 
 **Streaming requires access to this server.** Download a complete Opus or M4A file
-for use in a separate compatible player without server connectivity. This UI does
-not claim offline browser playback or installation; that work belongs to issue
-#6. A desktop browser at a mobile viewport does not establish Android screen-off
+for use in a separate compatible player without server connectivity. The installed
+shell saves the interface only, as described in issue #6 below. A desktop browser
+at a mobile viewport does not establish Android screen-off
 playback or physical-phone compatibility.
 
 `GET /api/library?offset=0&limit=20` returns a page of chapter metadata and linked
@@ -447,3 +448,31 @@ is explicitly skipped. Unit fixtures cannot establish real media, HTTPS browser,
 installation or physical-device acceptance. Keep native browser receipts,
 completed-download decode results and any temporary loopback certificate under
 ignored `.evidence/issue-6/`; never change global TLS trust to qualify the shell.
+
+## Safety and release qualification (issue #7)
+
+See [local operating instructions](docs/OPERATIONS.md) for start/stop, readiness,
+import/listening, backup, queue recovery, quotas, request guards and private-host
+configuration. See [dependencies and licences](docs/DEPENDENCIES.md) for the
+locked package inventory, model sources and GPL/LGPL components. ChapterCast's
+MIT source licence does not relicense those dependencies or imported content.
+
+Host headers are restricted to loopback names by default. Browser writes must
+be same-origin; foreign/null Origin and cross-site/same-site Fetch Metadata are
+rejected before import or queue mutation. Frames are denied. Native headerless
+local clients remain supported. There is no application authentication; private
+hosting access controls and service activation remain the controller's issue #8.
+
+The standard test command is `uv run --extra dev pytest -q`. Boundary coverage
+includes streamed request limits, UTF-8 byte accounting, hostile archive totals,
+encryption/compression, SSRF/redirect/TLS/deadline checks, process crash recovery,
+atomic publication and private API/cache boundaries. `scripts/audit_public.py`
+is a read-only tracked-history/current-file tripwire, supplemented by manual
+review for copyright and unrecognised secrets. Keep its findings private.
+
+The opt-in `scripts/verify_release.py` reuses source-bound original full-chapter
+evidence, generates a fresh real CPU preview, verifies both compact formats and
+complete downloads/ranges, then decodes saved files after application shutdown.
+All results remain ignored. Native browser, HTTPS, installation, physical-phone
+and screen-off evidence are separate gates. Local worker evidence and an
+independent exact-candidate review do not publish, activate or close this issue.

@@ -7,6 +7,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from chaptercast.config import Settings
 from chaptercast.database import initialise
@@ -43,12 +44,27 @@ def create_app(settings: Settings | None = None, *, backend: Backend | None = No
     app.state.settings = settings
     app.include_router(router)
     app.include_router(job_router)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=[
+        "127.0.0.1", "localhost", "[::1]", settings.host, *settings.trusted_hosts,
+    ], www_redirect=False)
 
     @app.middleware("http")
     async def private_responses(request, call_next):
-        response = await call_next(request)
+        # Loopback alone does not prevent a website from sending local writes.
+        # Headerless native clients remain usable; browser writes must be same-origin.
+        origins = request.headers.getlist("origin")
+        foreign_write = request.method not in {"GET", "HEAD", "OPTIONS"} and (
+            (origins and origins != [str(request.base_url).rstrip("/")])
+            or request.headers.get("sec-fetch-site", "none") not in {"same-origin", "none"}
+        )
+        if foreign_write:
+            response = JSONResponse({"code": "cross_origin", "message": "Open ChapterCast directly to perform this action."}, status_code=403)
+        else:
+            response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
     @app.get("/api/library")

@@ -142,6 +142,20 @@ def test_timeout_is_explicit_and_connection_closed(transport):
     assert exc.value.code == "ffn_unavailable" and calls[0].closed
 
 
+def test_overall_deadline_interrupts_stream_even_with_small_blocks(monkeypatch, transport):
+    calls, replies, _ = transport
+    clock = [0.0]
+    monkeypatch.setattr(ffn.time, "monotonic", lambda: clock[0])
+    class SlowResponse(Response):
+        def read1(self, size):
+            clock[0] += ffn.FETCH_SECONDS + 1
+            return b"x"
+    replies.append(SlowResponse())
+    with pytest.raises(ImportFailure) as exc:
+        ffn.fetch_chapter(URL)
+    assert exc.value.code == "ffn_unavailable" and calls[0].closed
+
+
 def test_mixed_public_private_dns_is_rejected(monkeypatch):
     monkeypatch.setattr(ffn.socket, "getaddrinfo", lambda *a, **kw: [(socket.AF_INET, 1, 6, "", ("8.8.8.8", 443)), (socket.AF_INET, 1, 6, "", ("10.0.0.1", 443))])
     with pytest.raises(ImportFailure) as exc:

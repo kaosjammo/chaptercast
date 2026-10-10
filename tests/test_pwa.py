@@ -12,7 +12,7 @@ from chaptercast.config import Settings
 
 
 def test_installable_shell_resources(tmp_path):
-    with TestClient(create_app(Settings(data_dir=tmp_path))) as client:
+    with TestClient(create_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
         shell = client.get('/')
         assert 'rel="manifest"' in shell.text
         assert 'offline-limits' in shell.text

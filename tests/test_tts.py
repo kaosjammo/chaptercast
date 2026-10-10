@@ -105,7 +105,7 @@ def test_unavailable_preview_is_explicit(tmp_path):
     from fastapi.testclient import TestClient
     from chaptercast.app import create_app
     from chaptercast.config import Settings
-    with TestClient(create_app(Settings(data_dir=tmp_path))) as client:
+    with TestClient(create_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
         response = client.post('/api/jobs/preview', json={})
         assert response.status_code == 503
         assert response.json()['code'] == 'backend_unavailable'

@@ -12,7 +12,7 @@ from chaptercast.jobs import GenerationSettings, digest
 
 def test_library_persists_imports_jobs_and_cross_import_cache_links(tmp_path):
     app = create_app(Settings(data_dir=tmp_path))
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.get('/api/library').json()['chapters'] == []
         chapters = [client.post('/api/import/text', json={
             'title': title, 'text': 'Original library fixture. A little bell rings.'
@@ -33,7 +33,7 @@ def test_library_persists_imports_jobs_and_cross_import_cache_links(tmp_path):
         assert client.get('/api/library?offset=-1').status_code == 422
         assert client.get('/api/library?limit=101').status_code == 422
         client.post(f"/api/jobs/{job['id']}/cancel")
-    with TestClient(create_app(Settings(data_dir=tmp_path))) as client:
+    with TestClient(create_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
         library = client.get('/api/library').json()
         assert library['chapters'][0]['jobs'][0]['status'] == 'cancelled'
         assert client.get('/api/library').headers['cache-control'] == 'no-store'
@@ -55,7 +55,7 @@ def test_schema_two_migration_backfills_library_job_links(tmp_path):
 
 def test_preview_is_in_queue_history_but_not_imported_library(tmp_path):
     app = create_app(Settings(data_dir=tmp_path))
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         preview = app.state.jobs.preview(GenerationSettings())
         library = client.get('/api/library').json()
         assert library['chapters'] == [] and library['total'] == 0
@@ -65,7 +65,7 @@ def test_preview_is_in_queue_history_but_not_imported_library(tmp_path):
 
 
 def test_completed_output_range_and_safe_download_name(tmp_path):
-    with TestClient(create_app(Settings(data_dir=tmp_path))) as client:
+    with TestClient(create_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
         chapter = client.post('/api/import/text', json={
             'title': '../"<Original> / café', 'text': 'Original transport fixture.'
         }).json()

@@ -106,7 +106,7 @@ def test_cancelled_jobs_are_terminal_and_private_paths_are_not_returned(store):
 
 def test_api_submission_survives_client_disconnect_and_server_restart(tmp_path):
     settings = Settings(data_dir=tmp_path)
-    with TestClient(create_app(settings)) as client:
+    with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
         identifier = client.post("/api/import/text", json={"text": "Original durable API fixture."}).json()["id"]
         response = client.post("/api/jobs", json={"chapter_id": identifier})
         assert response.status_code == 202
@@ -117,7 +117,7 @@ def test_api_submission_survives_client_disconnect_and_server_restart(tmp_path):
         for invalid in ({"voice": "unsupported"}, {"voice": []}, {"speed": True}, {"speed": 10**500}, {"formats": ["opus", "opus"]}, {"formats": "opus"}, {"unexpected": True}):
             assert client.post("/api/jobs", json={"chapter_id": identifier, **invalid}).status_code == 400
         assert client.post("/api/jobs", content=b"x" * 8193).status_code == 413
-    with TestClient(create_app(settings)) as client:
+    with TestClient(create_app(settings), base_url="http://127.0.0.1") as client:
         assert client.get(f'/api/jobs/{job["id"]}').json()["status"] == "queued"
         assert client.post(f'/api/jobs/{job["id"]}/cancel').json()["status"] == "cancelled"
         assert client.get("/api/jobs/99999").status_code == 404
