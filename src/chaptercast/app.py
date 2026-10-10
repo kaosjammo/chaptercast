@@ -75,4 +75,9 @@ def create_app(settings: Settings | None = None, *, backend: Backend | None = No
     def shell() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    @app.get("/sw.js", include_in_schema=False)
+    def service_worker() -> FileResponse:
+        # Root URL gives the worker app-shell scope without a broad scope header.
+        return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript")
+
     return app

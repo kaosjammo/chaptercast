@@ -2,6 +2,35 @@
 
 const status = document.getElementById("connection-status");
 const button = document.getElementById("check-connection");
+let serverAvailable = navigator.onLine;
+function connectionState(available) {
+  serverAvailable = available && navigator.onLine;
+  const offline = document.getElementById("offline-status");
+  offline.hidden = serverAvailable;
+  offline.textContent = "Server unavailable. Only the app interface is available offline. Open a previously completed download in your device’s audio player. Reconnect, then refresh the library to continue.";
+}
+connectionState(serverAvailable);
+window.addEventListener("offline", () => connectionState(false));
+window.addEventListener("online", () => { checkConnection(); refreshLibrary(); });
+
+async function prepareShell() {
+  const shellStatus = document.getElementById("shell-status");
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) {
+    shellStatus.textContent = "Offline interface unavailable here. Use HTTPS for installation and the offline shell.";
+    return;
+  }
+  try {
+    await navigator.serviceWorker.register("/sw.js", {scope: "/", updateViaCache: "none"});
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Offline shell timed out")), 15000);
+      navigator.serviceWorker.ready.then(value => { clearTimeout(timeout); resolve(value); }, error => { clearTimeout(timeout); reject(error); });
+    });
+    shellStatus.textContent = "App interface ready for offline use. Install from your browser menu when offered.";
+  } catch {
+    shellStatus.textContent = "Could not prepare the offline interface. Reconnect and reload to try again.";
+  }
+}
+prepareShell();
 
 async function checkConnection() {
   button.disabled = true;
@@ -17,8 +46,10 @@ async function checkConnection() {
       throw new Error("Health check failed");
     }
     status.textContent = "Connected to ChapterCast.";
+    connectionState(true);
   } catch {
     status.textContent = "Could not reach ChapterCast. Check that the local server is running.";
+    connectionState(false);
   } finally {
     clearTimeout(timeout);
     button.disabled = false;
@@ -63,6 +94,7 @@ document.getElementById("fallback-upload").addEventListener("click", () => {
 });
 
 async function importRequest(path, init) {
+  if (!navigator.onLine) throw new Error("Offline. This action needs the server and has not been queued for retry.");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
   let response, data;
@@ -70,6 +102,7 @@ async function importRequest(path, init) {
     response = await fetch(path, {...init, cache: "no-store", signal: controller.signal});
     data = await response.json();
   } catch {
+    connectionState(false);
     throw new Error("Could not reach ChapterCast. Check the connection and try again.");
   } finally {
     clearTimeout(timeout);
@@ -79,6 +112,7 @@ async function importRequest(path, init) {
     error.code = data.code;
     throw error;
   }
+  connectionState(true);
   return data;
 }
 
@@ -360,12 +394,16 @@ function savePosition(force = false) {
   writeStorage(positionKey(), {seconds: player.ended ? 0 : player.currentTime, rate: Number(rate.value), format: format.value});
 }
 function loadMedia(seconds) {
+  previewAudio.pause();
   saveReady = false;
   restorePosition = seconds;
   playerStatus.textContent = "Loading chapter audio…";
   for (const control of [toggle, seek, document.getElementById("skip-back"), document.getElementById("skip-forward")]) control.disabled = true;
   player.src = selected.job.outputs.find(output => output.format === format.value).url;
   player.load();
+  setChapterCastMediaSession(player, selected.chapter.title, () => {
+    playerStatus.textContent = "Playback could not start. Press Play or download the complete file.";
+  });
 }
 function openPlayer(chapter, job, focus = true) {
   if (!job) return;
@@ -408,7 +446,12 @@ toggle.addEventListener("click", async () => {
     catch { playerStatus.textContent = "Playback could not start. Try Play again, change format, or download the file."; }
   }
 });
-player.addEventListener("play", () => { previewAudio.pause(); toggle.textContent = "Pause"; });
+player.addEventListener("play", () => {
+  previewAudio.pause(); toggle.textContent = "Pause";
+  setChapterCastMediaSession(player, selected?.chapter.title || "Chapter audio", () => {
+    playerStatus.textContent = "Playback could not start. Press Play or download the complete file.";
+  });
+});
 player.addEventListener("playing", () => { playerStatus.textContent = "Playing from this server."; });
 player.addEventListener("pause", () => { toggle.textContent = "Play"; savePosition(true); if (saveReady) playerStatus.textContent = "Paused."; });
 player.addEventListener("waiting", () => { if (saveReady) playerStatus.textContent = "Buffering audio from this server…"; });
@@ -420,7 +463,17 @@ player.addEventListener("error", () => {
 player.addEventListener("timeupdate", () => { updateTime(); savePosition(); });
 player.addEventListener("seeked", () => savePosition(true));
 player.addEventListener("ended", () => { savePosition(true); playerStatus.textContent = "Chapter finished. Saved position reset to the beginning."; });
-previewAudio.addEventListener("play", () => player.pause());
+previewAudio.addEventListener("play", () => {
+  player.pause();
+  setChapterCastMediaSession(previewAudio, "British voice preview", () => {
+    previewStatus.textContent = "Preview playback could not start. Use its Play control.";
+  });
+});
+for (const audio of [player, previewAudio]) {
+  for (const event of ["loadedmetadata", "durationchange", "play", "pause", "ended", "timeupdate", "seeked", "ratechange", "emptied", "error"]) {
+    audio.addEventListener(event, () => updateChapterCastMediaSession(audio));
+  }
+}
 previewAudio.addEventListener("error", () => { previewStatus.textContent = "Preview audio could not be loaded. Check the connection or download another format."; });
 rate.addEventListener("change", () => { player.playbackRate = Number(rate.value); savePosition(true); });
 player.addEventListener("ratechange", () => {

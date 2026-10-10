@@ -2,7 +2,7 @@
 
 A private chapter-to-audiobook tool: submit text or a supported chapter URL from a phone, generate narration on a desktop, and play or download a compact complete chapter.
 
-**Status:** implementation in progress. Local Kokoro narration, compact export and a responsive library/player are implemented; no deployed service is claimed.
+**Status:** implementation in progress. Local Kokoro narration, compact export, a responsive library/player and an installable offline interface are implemented; no deployed service is claimed.
 
 ## MVP architecture
 
@@ -397,3 +397,53 @@ reload and switch chapters to check resume, exercise import/queue/media errors,
 and inspect narrow and desktop layouts. Keep browser receipts and screenshots
 under ignored `.evidence/issue-5/`; controller acceptance and publication remain
 separate from worker implementation.
+
+## Installable shell and downloaded listening (issue #6)
+
+The manifest provides standalone display and original PNG icons, including a
+maskable icon. On Android, use the browser's **Install app** or **Add to Home
+screen** option when offered. Installation availability depends on the browser.
+Use HTTPS on private hosting when deployment is authorised in issue #8. Loopback
+HTTP is useful for development service-worker checks but does not establish HTTPS
+browser acceptance.
+
+The root-scoped `/sw.js` caches only eight fixed resources: `/`, CSS, the two UI
+scripts, the manifest and three icons. It fetches those resources without
+credentials, original request headers or redirects. It serves a versioned shell
+without growing the cache during normal use; increment `SHELL_CACHE` whenever
+shell assets change. Updates activate immediately and take effect on reload.
+Only caches with the `chaptercast-shell-` prefix are cleaned up. API, library,
+chapter/audio, health, query-bearing, authenticated, range and mutation requests
+are outside the service-worker allowlist. API/audio responses remain `no-store`.
+There is no background sync, offline submission queue or mutation replay.
+
+Offline use saves the interface only. Library updates, imports, narration,
+streaming and new downloads need the server. The page shows explicit limits and a
+server-unavailable message. Resume settings store chapter/job identifiers,
+position, format and rate locally; they do not store chapter text, tokens or
+audio. A browser may evict the shell or local settings.
+
+**Download M4A** or **Download OPUS** retrieves the existing completed, validated
+file with a safe attachment filename, content length and audio MIME type. Wait
+for the download to finish and open it from your device's Downloads in a separate
+audio player. M4A is offered for broad compatibility; Opus requires a player that
+supports it. The saved file is independent of the server and the browser shell.
+Streaming or a buffered tab does not establish a completed offline download.
+Android external-player opening and physical Fold screen-off playback still
+require device qualification.
+
+Where Media Session is available, play, pause, stop, relative seek and seek-to
+handlers control the current chapter or voice preview. Metadata, playback state,
+position and rate follow the active audio element. Unsupported actions are
+ignored individually; ordinary browser controls remain available. OS/lock-screen
+control availability and screen-off continuity depend on the device/browser.
+See the [Media Session API documentation](https://developer.mozilla.org/en-US/docs/Web/API/MediaSession)
+and [service-worker documentation](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers).
+
+`uv run --extra dev pytest -q` includes shell transport checks. With Node installed,
+it also runs isolated service-worker cache-boundary and Media Session contract
+checks through `node --test tests/js/pwa.test.cjs`; without Node that contract test
+is explicitly skipped. Unit fixtures cannot establish real media, HTTPS browser,
+installation or physical-device acceptance. Keep native browser receipts,
+completed-download decode results and any temporary loopback certificate under
+ignored `.evidence/issue-6/`; never change global TLS trust to qualify the shell.

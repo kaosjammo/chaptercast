@@ -4,8 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#305843">
     <title>ChapterCast</title>
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/media-session.js" defer></script>
     <script src="/static/app.js" defer></script>
   </head>
   <body>
@@ -16,6 +20,13 @@
         <p>Turn chapters into audio, at your own pace.</p>
         <nav aria-label="Main"><a href="#library-heading">Library</a><a href="#import-heading">Import</a><a href="#voice-heading">Voice preview</a></nav>
       </header>
+      <section aria-labelledby="offline-heading">
+        <h2 id="offline-heading">Install and listen offline</h2>
+        <p id="shell-status" role="status">Preparing the offline shell…</p>
+        <p id="offline-status" role="status" hidden></p>
+        <p id="offline-limits" class="hint">Only the app interface is saved offline. Library updates, imports, generation, streaming and new downloads need the server. Nothing submitted offline is queued or retried automatically.</p>
+        <p class="hint">On Android, use your browser’s Install app or Add to Home screen option when offered. Download M4A for broad player compatibility, or Opus if your player supports it. Wait for the browser’s download to finish, then open the saved file from Downloads in your audio player. Downloaded files stay on your device; buffered streaming is not an offline download.</p>
+      </section>
       <section aria-labelledby="player-heading" id="player-section" hidden>
         <h2 id="player-heading">Chapter player</h2>
         <h3 id="player-title"></h3>
