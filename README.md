@@ -35,9 +35,12 @@ A native Android client, whole-story crawling, character-specific voices and pai
 ## Development and operation
 
 The foundation provides a health route, a static mobile shell and SQLite metadata
-tables for chapters, jobs and audio outputs. Text, TXT, EPUB chapter selection and
-bounded FanFiction.net chapter import are implemented. Queue execution, Kokoro
-narration, audio encoding and playback remain later issues.
+tables for chapters, jobs, chunk checkpoints and audio outputs. Text, TXT, EPUB
+chapter selection and bounded FanFiction.net chapter import are implemented. A
+durable server-owned queue is implemented behind a synthesis/encoding adapter.
+Real Kokoro narration and encoding are reserved for issue #4; the default app
+keeps submitted jobs queued until that backend is provided. Playback remains a
+later issue.
 
 Use Python **3.11 or 3.12** and [uv](https://docs.astral.sh/uv/). From the repository
 root, install the locked dependencies in the project's `.venv`:
@@ -51,7 +54,10 @@ uv run --extra dev pytest -q
 
 The `dev` extra contains the unit/API test dependencies. Tests use temporary
 databases and in-process HTTP requests; they need no credentials, models, FFmpeg,
-TTS service or external integration. CI runs this suite on Python 3.11 and 3.12.
+TTS service or external integration. Queue publication tests use original
+synthetic PCM with real FFmpeg/ffprobe when those executables are installed;
+those tests explicitly skip when they are unavailable. They do not prove Kokoro
+narration. CI runs this suite on Python 3.11 and 3.12.
 Dependency installation requires access to PyPI. If `uv` is outside your PATH,
 use its existing absolute executable path rather than installing a duplicate.
 
@@ -77,9 +83,12 @@ the application does **not** automatically load `.env` files:
 | `CHAPTERCAST_DATA_DIR` | `.runtime` | Private data directory, relative to the working directory or absolute. |
 
 Startup creates `metadata.sqlite3`, `uploads/`, `models/` and `audio/` beneath the
-data directory. Schema version 1 uses SQLite foreign keys and constrained job
-states and output formats. A newer schema version fails startup rather than being
-overwritten. This schema does not yet implement a durable queue.
+data directory. Schema version 2 uses SQLite foreign keys, constrained job
+states/output formats and chunk checkpoints. Version 1 migrates transactionally:
+imports and legacy output records are retained; old queued/running jobs become
+failed with `legacy_job_not_resumable` because they have no content/settings
+snapshot. Legacy outputs have no validation manifest and are not served. A newer
+schema version fails startup rather than being overwritten.
 
 Keep private content, credentials, models, generated audio, browser evidence and
 logs in ignored `.runtime/` or `.evidence/` paths. If you override the data
@@ -165,3 +174,93 @@ under the private data directory's `uploads/`; they are not served as static fil
 Original EPUB uploads remain local for subsequent chapter selection. Failed text
 saves roll back and remove the text file. FFN source HTML is never persisted.
 No imported content is published by these routes.
+
+## Durable queue (issue #3)
+
+Submit an imported chapter with `POST /api/jobs`, for example:
+
+```json
+{"chapter_id": 1, "voice": "bf_emma", "speed": 1.0, "formats": ["opus", "m4a"]}
+```
+
+The API returns HTTP 202 with a persisted job identifier. Poll `GET /api/jobs/{id}`
+for status, completed/total chunks, progress and output metadata. States are
+`queued`, `running`, `completed`, `failed` and `cancelled`. Progress measures chunk
+synthesis; it may reach 1 while encoding/validation is still running. Only
+`completed` makes outputs available. `POST /api/jobs/{id}/cancel` cancels queued
+or running work; completed/failed/cancelled jobs are terminal. A new submission
+can create a fresh job after failure/cancellation. No request, browser connection
+or page owns the worker, so disconnecting does not cancel a submitted job.
+
+Supported voice identifiers are `bf_emma` (default), `bf_isabella`, `bm_george` and
+`bm_lewis`; speed is 0.5–2.0. Formats may contain Opus, M4A or both (default).
+Canonical cache keys cover normalised content, voice, speed, requested formats,
+chunking and pipeline version. Matching queued/running/completed submissions
+reuse the existing job, including submissions from another identical import.
+Cancelled/failed jobs are not reused. Missing or changed completed files invalidate
+the cache. Queue settings and every chunk's original text are snapshotted in
+SQLite, so recovery does not reread a changed upload.
+
+One server-owned thread holds an OS process lock in `worker.lock` for its entire
+lifetime. A second app using the same local data directory can submit and poll,
+but cannot claim work. The lock has no expiry; process death releases it. Restart
+requeues interrupted running jobs, verifies completed WAV checkpoints against
+their stored hashes, removes partial/uncommitted files and resumes only missing
+or damaged chunks. Intact completed chunks are not synthesised again. Graceful
+shutdown requeues interrupted work with checkpoints intact. This requires a
+local filesystem with SQLite transactions, POSIX locks and atomic directory
+rename; network/shared multi-host storage is unsupported.
+
+Chunks prefer English sentence/paragraph boundaries, recognise a small set of
+common abbreviations and preserve every character of normalised text in order.
+Long sentences split at whitespace, then at a character boundary for long tokens.
+This is a conservative heuristic, not a full linguistic parser.
+
+The worker independently validates mono PCM16 chunks. Every requested final
+format must have the expected container/codec, positive duration covering the
+ordered chunks, bounded bytes and a successful full FFmpeg decode. All output
+files are flushed and renamed together into a private ready directory, then all
+metadata and the completed state commit in one SQLite transaction. Cancellation
+competes with that same transaction. Files from a crash before commit remain
+invisible and are reclaimed on recovery. Downloads at
+`GET /api/jobs/{id}/outputs/{opus|m4a}` require completed state and intact hashes;
+private work directories and uploads are never static routes.
+
+Generation admission and execution limits are fixed:
+
+| Limit | Value |
+| --- | --- |
+| Submission JSON | 8 KiB |
+| Normalised text | 100,000 characters, within the import's 1 MiB UTF-8 limit |
+| Chunk size/count | 1,000 characters / 256 chunks |
+| Active jobs | 4 (including cancelled work still settling) |
+| Persisted job history | 100 jobs |
+| Generation artifacts | 256 MiB per job, 2 GiB aggregate reservation/accounting |
+| Individual PCM chunk | 8 MiB, at most 300 seconds |
+| Complete audio | At most 3,600 seconds |
+| Worker attempt | 1,800 seconds, checked between operations and by the adapter |
+| Validation subprocess | 30 seconds probe / 60 seconds full decode per format |
+
+Active jobs reserve their complete artifact allowance; terminal jobs retain their
+actual artifact accounting. Four maximum active job reservations total 1 GiB.
+One hour of mono 24 kHz PCM16 checkpoints requires 172,800,000 bytes before WAV
+headers; nominal 32 kbps Opus plus 48 kbps AAC adds roughly 36,000,000 bytes.
+The 256 MiB job budget accommodates these checkpoints and outputs with room for
+container overhead and bounded temporary work. Cancellation does not release a
+live worker's reservation before it settles. These are generation quotas, not
+quotas on import uploads or model downloads. No automatic deletion of private library data is
+implemented; a full history requires deliberate local maintenance while stopped.
+
+`GET /api/jobs/worker` reports `backend_ready` and `worker_owned`. In this issue
+`backend_ready` is false for the default application: jobs persist but real
+narration is unavailable. Issue #4 will provide the `Backend` adapter in
+`worker.py`, honouring cooperative cancellation, write budgets and bounded model
+and encoding operations. It must encode directly from the ordered WAV
+checkpoints or a bounded stream, without creating a second full-size concatenated
+PCM copy on disk. `max_bytes` covers peak additional disk usage across all output
+destinations and temporary work combined; the worker has already subtracted the
+existing checkpoints from the remaining encoding budget. Its pipeline version
+must change when model/rendering behaviour changes. Queue tests use labelled
+synthetic tones with real FFmpeg; they establish queue/validation behaviour, not
+live TTS, physical-phone behaviour
+or deployment acceptance.
