@@ -75,7 +75,7 @@ local proxy; do not enable arbitrary forwarded-header trust.
 
 No public bind, Funnel, route replacement or live activation is authorised by
 issue #7. Portable service/deployment preparation and owning-controller
-activation belong to issue #8.
+activation belong to issue #8; follow the [deployment runbook](DEPLOYMENT.md).
 
 The service worker caches only fixed shell resources. Offline library access,
 imports, queue mutations, narration, streaming and new downloads are unavailable.

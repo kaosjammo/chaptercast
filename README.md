@@ -2,7 +2,7 @@
 
 A private chapter-to-audiobook tool: submit text or a supported chapter URL from a phone, generate narration on a desktop, and play or download a compact complete chapter.
 
-**Status:** implementation in progress. Local Kokoro narration, compact export, a responsive library/player and an installable offline interface are implemented; no deployed service is claimed.
+**Status:** implementation in progress. Local narration, player and offline shell are implemented. Portable user-service preparation and private deployment instructions are available; controller activation and deployed HTTPS acceptance remain pending.
 
 ## MVP architecture
 
@@ -98,8 +98,10 @@ directory, keep it outside Git or add a local ignore rule before using it. Do no
 commit real chapter contents or device/host/authentication details. The tests use
 only original, labelled synthetic text, EPUB and HTML fixtures.
 
-Private Tailscale hosting and service activation are reserved for issue #8. These
-development commands do not configure Serve, Funnel or any live service. Model setup is documented below; deployment instructions remain later work. Use content you are
+See [private desktop deployment](docs/DEPLOYMENT.md) for issue #8 preparation,
+controller-only activation, a dedicated unused Serve HTTPS port, verification,
+rollback and phone onboarding. These development commands do not configure
+Serve, Funnel or any live service. Model setup is documented below. Use content you are
 entitled to process; this application does not redistribute imported works.
 
 ## Chapter import (issue #2)
