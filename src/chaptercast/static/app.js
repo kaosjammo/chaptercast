@@ -279,6 +279,7 @@ const refreshButton = document.getElementById("refresh-library");
 let libraryOffset = 0;
 let libraryBusy = false;
 let libraryPending = null;
+let libraryRevision = 0;
 let pollTimer;
 let activeJob = null;
 let previewJob = null;
@@ -574,6 +575,9 @@ function renderLibrary(data) {
   }
 }
 async function refreshLibrary(fresh = false) {
+  // A successful write can make an already-running read older than the
+  // state on screen, even when both reads use the same page offset.
+  if (fresh) libraryRevision += 1;
   if (libraryBusy) {
     await libraryPending;
     if (fresh) return refreshLibrary();
@@ -585,6 +589,7 @@ async function refreshLibrary(fresh = false) {
   refreshButton.disabled = true;
   clearTimeout(pollTimer);
   const offset = libraryOffset;
+  const revision = libraryRevision;
   try {
     const query = new URLSearchParams({offset, limit: 20});
     if (!selectionRestored) {
@@ -595,9 +600,11 @@ async function refreshLibrary(fresh = false) {
       }
     }
     const data = await importRequest(`/api/library?${query}`, {});
-    if (offset === libraryOffset) renderLibrary(data);
+    if (revision === libraryRevision && offset === libraryOffset) renderLibrary(data);
   } catch (error) {
-    libraryStatus.textContent = `${error.message} Library updates paused; submitted jobs continue on the server. Refresh to reconnect.`;
+    if (revision === libraryRevision) {
+      libraryStatus.textContent = `${error.message} Library updates paused; submitted jobs continue on the server. Refresh to reconnect.`;
+    }
   } finally {
     libraryBusy = false;
     resolvePending();
@@ -753,7 +760,10 @@ function playFromLibrary(chapter, job) {
 }
 async function playChapter() {
   if (!selected) return;
-  if (player.error) loadMedia(readStorage(positionKey())?.seconds || restorePosition);
+  if (player.error) {
+    const saved = readStorage(positionKey())?.seconds;
+    loadMedia(Number.isFinite(saved) ? saved : restorePosition);
+  }
   previewAudio.pause();
   const load = mediaLoad;
   try {

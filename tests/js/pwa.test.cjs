@@ -125,3 +125,41 @@ test('incomplete shell install retains the previously controlled version and nev
   await assert.rejects(install, /Offline fixture/);
   assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-v5'}]);
 });
+
+test('a fresh library read supersedes a stale status at the same offset', async () => {
+  const source = fs.readFileSync('src/chaptercast/static/app.js', 'utf8');
+  const start = source.indexOf('async function refreshLibrary(');
+  const end = source.indexOf('refreshButton.addEventListener', start);
+  assert.ok(start >= 0 && end > start);
+
+  const pending = [];
+  const rendered = [];
+  const context = {
+    URLSearchParams,
+    document: {hidden: true},
+    refreshButton: {},
+    libraryStatus: {},
+    clearTimeout: () => {},
+    importRequest: path => new Promise(resolve => pending.push({path, resolve})),
+    renderLibrary: data => rendered.push(data),
+  };
+  vm.runInNewContext(`
+    let libraryOffset = 0, libraryBusy = false, libraryPending = null, libraryRevision = 0;
+    let pollTimer, selectionRestored = true;
+    ${source.slice(start, end)}
+  `, context);
+
+  const previous = context.refreshLibrary();
+  const fresh = context.refreshLibrary(true);
+  assert.equal(pending.length, 1);
+  pending[0].resolve({jobs: [{id: 1, status: 'queued'}]});
+  await previous;
+  assert.deepEqual(rendered, []);
+
+  assert.equal(pending.length, 2);
+  assert.equal(pending[1].path, pending[0].path);
+  const completed = {jobs: [{id: 1, status: 'completed'}]};
+  pending[1].resolve(completed);
+  await fresh;
+  assert.deepEqual(rendered, [completed]);
+});
