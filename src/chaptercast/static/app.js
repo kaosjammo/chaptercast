@@ -165,6 +165,11 @@ const notionPlay = document.getElementById("notion-play");
 const notionRetry = document.getElementById("notion-retry");
 let notionSelection = null;
 
+function clearNotionResult() {
+  notionSelection = null;
+  notionResult.hidden = true;
+}
+
 function renderNotionJob(job) {
   notionSelection.job = job;
   const active = job.status === "queued" || job.status === "running";
@@ -400,6 +405,7 @@ deleteConfirm.addEventListener("click", async () => {
   deleteStatus.textContent = "Deleting generation…";
   try {
     await importRequest(`/api/jobs/${job.id}`, {method: "DELETE"});
+    if (notionSelection?.job.id === job.id) clearNotionResult();
     forgetGeneration(job);
     await refreshLibrary(true);
     const visible = document.getElementById("view-library").hidden ? generationStatus : libraryStatus;
@@ -543,10 +549,7 @@ function renderLibrary(data) {
   if (notionSelection) {
     const job = data.jobs.find(job => job.id === notionSelection.job.id);
     if (job) renderNotionJob(job);
-    else {
-      notionSelection = null;
-      notionResult.hidden = true;
-    }
+    else clearNotionResult();
   }
   syncActivityBanner();
   if (selected && !data.jobs.some(job => job.id === selected.job.id && job.status === "completed" && job.outputs.length)) {
