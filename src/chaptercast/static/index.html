@@ -57,12 +57,12 @@
 <div class="actions" hidden id="library-pagination"><button disabled="" id="library-previous" type="button">Previous page</button><span id="library-page"></span><button disabled="" id="library-next" type="button">Next page</button></div>
 </section></section><section aria-labelledby="tab-generate" hidden="" id="view-generate" role="tabpanel" tabindex="0"><section aria-labelledby="import-heading" class="view-content">
 <h2 id="import-heading">Import a chapter</h2>
-<p>Paste text, upload UTF-8 TXT or choose a chapter from an EPUB. FFN may block URL imports; paste and upload remain available.</p>
+<p>Paste text, upload a PDF or UTF-8 TXT file or choose a chapter from an EPUB.</p>
 <form id="import-form">
 <label for="import-source">Source</label>
 <select id="import-source">
 <option value="text">Pasted text</option>
-<option value="upload">TXT or EPUB upload</option>
+<option value="upload">PDF, TXT or EPUB upload</option>
 <option value="url">FanFiction.net chapter URL</option>
 </select>
 <label for="import-title">Title (optional)</label>
@@ -73,9 +73,9 @@
 <p class="hint" id="text-limit">Up to 1 MiB of UTF-8 text. Blank lines separate paragraphs.</p>
 </div>
 <div hidden="" id="upload-fields">
-<label for="chapter-file">TXT or EPUB file</label>
-<input accept=".txt,.epub" id="chapter-file" type="file"/>
-<p class="hint">TXT: 1 MiB. EPUB: 10 MiB; choose one chapter after upload.</p>
+<label for="chapter-file">PDF, TXT or EPUB file</label>
+<input accept=".pdf,.txt,.epub,application/pdf" aria-describedby="upload-limit" id="chapter-file" type="file"/>
+<p class="hint" id="upload-limit">PDF or EPUB up to 10 MiB. TXT up to 1 MiB. PDF narration uses selectable text. Scanned pages need OCR first.</p>
 <div hidden="" id="epub-fields">
 <label for="epub-chapter">EPUB chapter in reading order</label>
 <select id="epub-chapter"></select>
@@ -93,7 +93,7 @@
 <div hidden="" id="ffn-fallback">
 <p>FanFiction.net blocked this request. No chapter was imported.</p>
 <button id="fallback-paste" type="button">Paste text instead</button>
-<button id="fallback-upload" type="button">Upload TXT or EPUB instead</button>
+<button id="fallback-upload" type="button">Upload a file instead</button>
 </div>
 </section><details id="voice-settings"><summary>Voice &amp; narration settings</summary><section aria-labelledby="voice-heading" class="view-content">
 <h2 id="voice-heading">British voice preview</h2>

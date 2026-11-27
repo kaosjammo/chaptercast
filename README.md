@@ -35,7 +35,7 @@ A native Android client, whole-story crawling, character-specific voices and pai
 ## Development and operation
 
 The foundation provides a health route, a static mobile shell and SQLite metadata
-tables for chapters, jobs, chunk checkpoints and audio outputs. Text, TXT, EPUB
+tables for chapters, jobs, chunk checkpoints and audio outputs. Text, TXT, PDF, EPUB
 chapter selection and bounded FanFiction.net chapter import are implemented. A
 durable server-owned queue is implemented behind a synthesis/encoding adapter.
 Local CPU Kokoro narration and FFmpeg export are available after explicit model
@@ -96,7 +96,7 @@ Keep private content, credentials, models, generated audio, browser evidence and
 logs in ignored `.runtime/` or `.evidence/` paths. If you override the data
 directory, keep it outside Git or add a local ignore rule before using it. Do not
 commit real chapter contents or device/host/authentication details. The tests use
-only original, labelled synthetic text, EPUB and HTML fixtures.
+only original, labelled synthetic text, PDF, EPUB and HTML fixtures.
 
 See [private desktop deployment](docs/DEPLOYMENT.md) for issue #8 preparation,
 controller-only activation, a dedicated unused Serve HTTPS port, verification,
@@ -125,8 +125,8 @@ existing audio if available.
 
 ### Other import sources
 
-Use the **Import** tab in the browser shell. Choose pasted text, a UTF-8 TXT
-upload, an EPUB upload or a supported FanFiction.net URL. EPUB upload first lists
+Use the **Import** tab in the browser shell. Paste text, upload a PDF, UTF-8 TXT
+or EPUB file or enter a supported FanFiction.net URL. EPUB upload first lists
 chapters in spine reading order; select one and press **Import selected chapter**.
 Only that chapter is saved. Imported metadata appears in the persistent, paginated **Library**, including
 after reload or server restart.
@@ -152,10 +152,16 @@ Limits are fixed to keep import bounded:
 | --- | --- |
 | Normalised chapter text / TXT upload | 1 MiB UTF-8 |
 | Pasted JSON request envelope | 2 MiB |
-| EPUB upload | 10 MiB |
+| PDF or EPUB upload | 10 MiB |
+| Extracted PDF text | 1 MiB UTF-8, 12 seconds to extract |
 | EPUB archive | 512 members, 32 MiB total expanded, 10 MiB per member, 200:1 ratio |
 | EPUB metadata or individual XHTML chapter | 2 MiB |
 | FFN response | 2 MiB HTML, 20 seconds total, 3 redirects |
+
+PDF import uses the local Poppler `pdftotext` and `pdfimages` executables.
+Install Poppler on the ChapterCast host (`poppler-utils` on Debian or Ubuntu).
+ChapterCast saves only selectable text in page order. If a page contains images
+but has no selectable text, run OCR first. Blank pages are skipped.
 
 EPUB supports unencrypted ZIP stored/deflated members and local XHTML spine
 chapters (EPUB 2/3). Duplicate/unsafe member paths, symlinks, encryption, bad CRCs,
@@ -178,13 +184,14 @@ HTTP 403/429/503, challenge pages and pages without a single story container
 return `ffn_blocked` with paste/upload fallback. Other network/content failures
 also fail explicitly. Synthetic fixture extraction tests establish parser and
 transport behaviour, **not live FFN availability**. A blocked live request does
-not make paste, TXT or EPUB import unavailable.
+not make paste, PDF, TXT or EPUB import unavailable.
 
 Import routes:
 
 - `POST /api/import/text`: JSON `text`, optional `title`, `exclude_notes`.
 - `POST /api/import/upload?filename=original.txt`: raw UTF-8 file bytes; optional
-  `title` and `exclude_notes=true` query parameters. Use `.epub` for raw EPUB bytes;
+  `title` and `exclude_notes=true` query parameters. Use `.pdf` for raw PDF bytes
+  or `.epub` for raw EPUB bytes. For EPUB,
   the response contains an upload identifier and chapter choices.
 - `POST /api/import/epub`: JSON `upload_id`, `chapter_id`, optional `title`,
   `exclude_notes`.

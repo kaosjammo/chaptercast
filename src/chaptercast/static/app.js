@@ -238,7 +238,7 @@ form.addEventListener("submit", async (event) => {
       result = await importRequest("/api/import/epub", json({title, exclude_notes, upload_id: uploadId, chapter_id: chapterSelect.value}));
     } else {
       const file = fileInput.files[0];
-      if (!file) throw new Error("Choose a TXT or EPUB file.");
+      if (!file) throw new Error("Choose a PDF, TXT or EPUB file.");
       const limit = file.name.toLowerCase().endsWith(".txt") ? 1048576 : 10485760;
       if (file.size > limit) throw new Error("File exceeds the upload size limit.");
       const query = new URLSearchParams({filename: file.name, exclude_notes: String(exclude_notes)});
