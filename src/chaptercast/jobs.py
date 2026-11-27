@@ -217,7 +217,7 @@ class JobStore:
             db.row_factory = sqlite3.Row
             return self._get(db, identifier)
 
-    def library(self, offset: int, limit: int) -> dict:
+    def library(self, offset: int, limit: int, *, resume: tuple[int, int] | None = None) -> dict:
         with connect(self.database) as db:
             db.row_factory = sqlite3.Row
             # Read a consistent page and queue without exposing text or disk paths.
@@ -236,7 +236,22 @@ class JobStore:
                 job["title"] = row["title"]
                 job["preview"] = row["text_path"] == "uploads/voice-preview.txt"
                 jobs.append(job)
-            return {"chapters": chapters, "jobs": jobs, "total": total, "offset": offset, "limit": limit}
+            result = {"chapters": chapters, "jobs": jobs, "total": total, "offset": offset, "limit": limit}
+            if resume is not None:
+                result["resume"] = self._resume(db, *resume)
+            return result
+
+    def _resume(self, db, chapter_id: int, job_id: int) -> dict | None:
+        chapter = db.execute("""SELECT chapters.id, chapters.title FROM chapters
+            JOIN chapter_jobs ON chapter_jobs.chapter_id=chapters.id
+            JOIN jobs ON jobs.id=chapter_jobs.job_id
+            WHERE chapters.id=? AND jobs.id=? AND jobs.status='completed'
+              AND chapters.text_path != 'uploads/voice-preview.txt'""", (chapter_id, job_id)).fetchone()
+        if chapter is not None:
+            job = self._get(db, job_id)
+            if job["outputs"]:
+                return {"chapter": dict(chapter), "job": job}
+        return None
 
     def download_name(self, identifier: int, format: str) -> str:
         # A short ASCII basename avoids path components, controls and header syntax.

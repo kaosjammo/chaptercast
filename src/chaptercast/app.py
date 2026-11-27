@@ -68,8 +68,11 @@ def create_app(settings: Settings | None = None, *, backend: Backend | None = No
         return response
 
     @app.get("/api/library")
-    def library(request: Request, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100)):
-        result = request.app.state.jobs.library(offset, limit)
+    def library(request: Request, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100),
+                resume_chapter: int | None = Query(None, ge=1, le=2**63 - 1),
+                resume_job: int | None = Query(None, ge=1, le=2**63 - 1)):
+        resume = (resume_chapter, resume_job) if resume_chapter is not None and resume_job is not None else None
+        result = request.app.state.jobs.library(offset, limit, resume=resume)
         worker = request.app.state.worker
         result["worker"] = {"backend_ready": worker.backend is not None, "worker_owned": worker.owns_lock}
         return result

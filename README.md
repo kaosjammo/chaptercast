@@ -109,7 +109,8 @@ entitled to process; this application does not redistribute imported works.
 ### Listen to a Notion page
 
 In Notion, use **Share → Copy link** on a page that has access to your
-ChapterCast connection. Paste the link into **Listen** and tap **Create audio**.
+ChapterCast connection. Use the workspace link with the page ID. Paste it
+into **Listen** and tap **Create audio**.
 Stay on that screen for progress and **Play**, or return later and find it in
 your library. Play and pause, skip 15 seconds or drag the timeline. Playback
 options include speed, format and an M4A download for offline listening.

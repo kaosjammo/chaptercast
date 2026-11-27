@@ -569,12 +569,8 @@ function renderLibrary(data) {
   }
   if (!selectionRestored) {
     selectionRestored = true;
-    const saved = readStorage("chaptercast-selected");
-    const chapter = data.chapters.find(chapter => chapter.id === saved?.id);
-    const job = chapter?.jobs.find(job => job.id === saved.job && job.status === "completed" && job.outputs.length);
-    if (job) openPlayer(chapter, job, false);
-    // Restore selections outside this page without fetching private chapter text.
-    else if (saved?.offset > 0 && libraryOffset === 0) { libraryOffset = saved.offset; selectionRestored = false; }
+    if (data.resume) openPlayer(data.resume.chapter, data.resume.job, false);
+    else if (data.resume === null) removeStorage("chaptercast-selected");
   }
 }
 async function refreshLibrary(fresh = false) {
@@ -590,7 +586,15 @@ async function refreshLibrary(fresh = false) {
   clearTimeout(pollTimer);
   const offset = libraryOffset;
   try {
-    const data = await importRequest(`/api/library?offset=${offset}&limit=20`, {});
+    const query = new URLSearchParams({offset, limit: 20});
+    if (!selectionRestored) {
+      const saved = readStorage("chaptercast-selected");
+      if (Number.isSafeInteger(saved?.id) && saved.id > 0 && Number.isSafeInteger(saved.job) && saved.job > 0) {
+        query.set("resume_chapter", saved.id);
+        query.set("resume_job", saved.job);
+      }
+    }
+    const data = await importRequest(`/api/library?${query}`, {});
     if (offset === libraryOffset) renderLibrary(data);
   } catch (error) {
     libraryStatus.textContent = `${error.message} Library updates paused; submitted jobs continue on the server. Refresh to reconnect.`;
@@ -718,6 +722,7 @@ function loadMedia(seconds) {
 }
 function openPlayer(chapter, job, focus = true) {
   if (!job) return;
+  selectionRestored = true;
   if (selected?.chapter.id === chapter.id && selected.job.id === job.id) {
     if (focus) toggle.focus();
     return;
@@ -737,7 +742,7 @@ function openPlayer(chapter, job, focus = true) {
   document.getElementById("player-title").textContent = chapter.title;
   downloadLinks(document.getElementById("player-downloads"), job);
   playerSection.hidden = false;
-  writeStorage("chaptercast-selected", {id: chapter.id, job: job.id, offset: libraryOffset});
+  writeStorage("chaptercast-selected", {id: chapter.id, job: job.id});
   loadMedia(Number.isFinite(saved?.seconds) && saved.seconds > 0 ? saved.seconds : 0);
   if (focus) toggle.focus();
 }

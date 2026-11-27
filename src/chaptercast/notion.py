@@ -1,6 +1,6 @@
 """Read a single shared Notion page through Notion's fixed, read-only API."""
 
-from http.client import HTTPException, HTTPSConnection
+from http.client import HTTPException
 import json
 import os
 from pathlib import Path
@@ -10,6 +10,7 @@ from time import monotonic, sleep
 from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import UUID
 
+from chaptercast.http_transport import PinnedHTTPSConnection, interrupt_at, resolve_public
 from chaptercast.imports import Chapter, ImportFailure, text_chapter
 
 API_HOST = "api.notion.com"
@@ -17,7 +18,7 @@ API_VERSION = "2026-03-11"
 PAGE_ID = r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})"
 PAGE_PATH_ID = re.compile(rf"(?:^|-)({PAGE_ID})$", re.I)
 TEXT_BLOCKS = {
-    "paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item",
+    "paragraph", "heading_1", "heading_2", "heading_3", "heading_4", "bulleted_list_item",
     "numbered_list_item", "to_do", "quote", "callout", "toggle",
 }
 NESTED_BLOCKS = TEXT_BLOCKS | {"column_list", "column", "synced_block", "table"}
@@ -89,6 +90,7 @@ class NotionPage:
         self.token = token
         self.max_characters = max_characters
         self.deadline = monotonic() + 20
+        self.address = None
         self.requests = 0
         self.blocks = 0
         self.characters = 0
@@ -99,49 +101,60 @@ class NotionPage:
             self.requests += 1
             if self.requests > MAX_REQUESTS:
                 raise page_limit()
-            remaining = self.deadline - monotonic()
-            if remaining <= 0:
-                raise response_error()
-            connection = HTTPSConnection(API_HOST, timeout=min(5, remaining))
             try:
-                # The pasted URL contributes only a validated UUID. Redirects are never followed.
-                connection.request("GET", path + (f"?{urlencode(query)}" if query else ""), headers={
-                    "Authorization": f"Bearer {self.token}",
-                    "Notion-Version": API_VERSION,
-                    "Accept": "application/json",
-                })
-                response = connection.getresponse()
-                if response.status == 401:
-                    raise ImportFailure("notion_invalid_token", "Update the Notion connection on your ChapterCast computer, then try again.", 503)
-                if response.status in (403, 404):
-                    raise ImportFailure("notion_page_access", "Check the page link and add your ChapterCast connection to the page in Notion.", 404)
-                if response.status == 429:
-                    delay = response.getheader("Retry-After") or ""
-                    if attempt == 0 and delay in {"1", "2", "3", "4", "5"} and monotonic() + int(delay) < self.deadline:
-                        connection.close()
-                        sleep(int(delay))
-                        continue
-                    raise ImportFailure("notion_busy", "Notion is receiving too many requests. Wait a few seconds, then try again.", 429)
-                if response.status != 200:
-                    raise response_error()
-                raw = bytearray()
-                while True:
-                    if monotonic() >= self.deadline:
-                        raise response_error()
-                    piece = response.read1(65536)
-                    if not piece:
-                        break
-                    raw.extend(piece)
-                    if len(raw) > MAX_RESPONSE_BYTES:
-                        raise page_limit()
-                result = json.loads(raw)
-                if not isinstance(result, dict):
-                    raise response_error()
-                return result
+                if self.address is None:
+                    self.address = resolve_public(API_HOST, min(3, self.remaining()))
+                family, address = self.address
+                connection = PinnedHTTPSConnection(API_HOST, family, address, min(5, self.remaining()), deadline=self.deadline)
+                try:
+                    with interrupt_at(connection, self.deadline):
+                        # Only validated IDs enter the request path. Never follow redirects.
+                        connection.request("GET", path + (f"?{urlencode(query)}" if query else ""), headers={
+                            "Authorization": f"Bearer {self.token}",
+                            "Notion-Version": API_VERSION,
+                            "Accept": "application/json",
+                        })
+                        with connection.getresponse() as response:
+                            self.remaining()
+                            if response.status != 429:
+                                return self.read_response(response)
+                            delay = response.getheader("Retry-After") or ""
+                finally:
+                    connection.close()
             except (OSError, HTTPException, ValueError, RecursionError) as exc:
                 raise response_error() from exc
-            finally:
-                connection.close()
+            if attempt == 0 and delay in {"1", "2", "3", "4", "5"} and int(delay) < self.remaining():
+                sleep(int(delay))
+                continue
+            raise ImportFailure("notion_busy", "Notion is receiving too many requests. Wait a few seconds, then try again.", 429)
+
+    def remaining(self) -> float:
+        remaining = self.deadline - monotonic()
+        if remaining <= 0:
+            raise response_error()
+        return remaining
+
+    def read_response(self, response) -> dict:
+        if response.status == 401:
+            raise ImportFailure("notion_invalid_token", "Update the Notion connection on your ChapterCast computer, then try again.", 503)
+        if response.status in (403, 404):
+            raise ImportFailure("notion_page_access", "Check the page link and add your ChapterCast connection to the page in Notion.", 404)
+        if response.status != 200:
+            raise response_error()
+        raw = bytearray()
+        while True:
+            self.remaining()
+            piece = response.read1(min(65536, MAX_RESPONSE_BYTES + 1 - len(raw)))
+            if not piece:
+                break
+            raw.extend(piece)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise page_limit()
+        result = json.loads(raw)
+        self.remaining()
+        if not isinstance(result, dict):
+            raise response_error()
+        return result
 
     def children(self, block_id: UUID, depth: int = 0) -> None:
         if depth > MAX_DEPTH:

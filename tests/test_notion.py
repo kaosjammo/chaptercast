@@ -2,8 +2,11 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from http.client import HTTPConnection
 from io import BytesIO
 import json
+import socket
+from time import monotonic
 from uuid import UUID
 
 import pytest
@@ -19,6 +22,7 @@ from chaptercast.jobs import GenerationSettings, JobFailure
 PAGE = UUID("5469a2100fcb4be1926cc2e9b7de58d0")
 TOGGLE = UUID("5469a2100fcb4be1926cc2e9b7de58d1")
 OTHER = UUID("5469a2100fcb4be1926cc2e9b7de58d2")
+HEADING = UUID("5469a2100fcb4be1926cc2e9b7de58d3")
 LINK = f"https://www.notion.so/Original-test-{PAGE.hex}?pvs=4#block"
 TOKEN = "synthetic_read_only_fixture"
 
@@ -68,11 +72,14 @@ def test_page_order_pagination_nested_text_and_no_subpage_requests(monkeypatch):
             return page_response()
         if path == f"/v1/blocks/{TOGGLE}/children":
             return blocks_response(block("paragraph", rich_text=rich("Nested note.")))
+        if path == f"/v1/blocks/{HEADING}/children":
+            return blocks_response(block("paragraph", rich_text=rich("Below level four.")))
         if path == f"/v1/blocks/{PAGE}/children" and "start_cursor" not in query:
             return blocks_response(
                 block("heading_1", rich_text=rich("Heading")),
                 block("paragraph", rich_text=rich("Original ", "prose.")),
                 block("toggle", TOGGLE, True, rich_text=rich("Read more")),
+                block("heading_4", HEADING, True, rich_text=rich("Level four")),
                 block("child_page", OTHER, True, title="Never narrated"),
                 cursor="opaque-1",
             )
@@ -83,8 +90,11 @@ def test_page_order_pagination_nested_text_and_no_subpage_requests(monkeypatch):
     monkeypatch.setattr(notion.NotionPage, "get", get)
     chapter = notion.NotionPage(TOKEN, 1000).chapter(PAGE)
     assert chapter.title == "An original test page"
-    assert chapter.text.split("\n\n") == ["Heading", "Original prose.", "Read more", "Nested note.", "Left. Right"]
-    assert len(paths) == 4
+    assert chapter.text.split("\n\n") == [
+        "Heading", "Original prose.", "Read more", "Nested note.", "Level four",
+        "Below level four.", "Left. Right",
+    ]
+    assert len(paths) == 5
     with pytest.raises(ImportFailure) as failure:
         notion.NotionPage(TOKEN, 20).chapter(PAGE)
     assert failure.value.status == 413
@@ -98,6 +108,8 @@ def test_page_order_pagination_nested_text_and_no_subpage_requests(monkeypatch):
 def test_notion_requests_use_only_the_official_api_without_redirects(monkeypatch, statuses, code):
     calls = []
     delays = []
+    resolved = []
+    endpoint = ("1.1.1.1", 443)
 
     class Response(BytesIO):
         def __init__(self):
@@ -108,8 +120,11 @@ def test_notion_requests_use_only_the_official_api_without_redirects(monkeypatch
             return "1" if len(statuses) > 1 else None
 
     class Transport:
-        def __init__(self, host, *, timeout):
+        sock = None
+
+        def __init__(self, host, family, address, timeout, *, deadline):
             assert host == "api.notion.com" and 0 < timeout <= 5
+            assert family == socket.AF_INET and address == endpoint and deadline > monotonic()
 
         def request(self, method, path, *, headers):
             calls.append(path)
@@ -123,7 +138,13 @@ def test_notion_requests_use_only_the_official_api_without_redirects(monkeypatch
         def close(self):
             pass
 
-    monkeypatch.setattr(notion, "HTTPSConnection", Transport)
+    def resolve(host, timeout):
+        resolved.append(host)
+        assert 0 < timeout <= 3
+        return socket.AF_INET, endpoint
+
+    monkeypatch.setattr(notion, "resolve_public", resolve)
+    monkeypatch.setattr(notion, "PinnedHTTPSConnection", Transport)
     monkeypatch.setattr(notion, "sleep", delays.append)
     api = notion.NotionPage(TOKEN, 1000)
     path = f"/v1/pages/{PAGE}"
@@ -136,6 +157,32 @@ def test_notion_requests_use_only_the_official_api_without_redirects(monkeypatch
         assert api.get(path) == page_response()
     assert calls == [path] * len(statuses)
     assert delays == ([1] if len(statuses) > 1 else [])
+    assert resolved == ["api.notion.com"]
+
+
+def test_slow_incomplete_http_headers_are_interrupted_at_the_deadline(monkeypatch):
+    client, server = socket.socketpair()
+    with client, server:
+        client.settimeout(2)
+        # The real HTTP parser will block waiting for the rest of these headers.
+        server.sendall(b"HTTP/1.1 200 OK\r\nContent-T")
+
+        class SlowConnection(HTTPConnection):
+            def __init__(self, host, family, address, timeout, *, deadline):
+                super().__init__(host, timeout=timeout)
+
+            def connect(self):
+                self.sock = client
+
+        monkeypatch.setattr(notion, "resolve_public", lambda *_: (socket.AF_INET, ("1.1.1.1", 443)))
+        monkeypatch.setattr(notion, "PinnedHTTPSConnection", SlowConnection)
+        api = notion.NotionPage(TOKEN, 1000)
+        began = monotonic()
+        api.deadline = began + 0.08
+        with pytest.raises(ImportFailure) as caught:
+            api.get(f"/v1/pages/{PAGE}")
+        assert caught.value.code == "notion_unavailable"
+        assert monotonic() - began < 0.6
 
 
 def test_token_must_be_private_and_regular(tmp_path):

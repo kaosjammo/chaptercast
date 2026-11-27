@@ -3,6 +3,7 @@
 from io import BytesIO
 import json
 import random
+import socket
 import zipfile
 
 import pytest
@@ -109,7 +110,7 @@ def test_unsupported_urls_rejected_before_dns(monkeypatch, url):
 
 @pytest.mark.parametrize("address", ["127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "::1", "::ffff:127.0.0.1", "2001:db8::1"])
 def test_nonpublic_dns_rejected(monkeypatch, address):
-    monkeypatch.setattr(ffn.socket, "getaddrinfo", lambda *args, **kwargs: [(2, 1, 6, "", (address, 443))])
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [(2, 1, 6, "", (address, 443))])
     with pytest.raises(ImportFailure, match="public"):
         ffn.resolve_public("www.fanfiction.net", 3)
 
