@@ -163,3 +163,86 @@ test('a fresh library read supersedes a stale status at the same offset', async 
   await fresh;
   assert.deepEqual(rendered, [completed]);
 });
+
+test('retry and format switching preserve position after a mid-chapter stream error', async () => {
+  const source = fs.readFileSync('src/chaptercast/static/app.js', 'utf8');
+  const start = source.indexOf('const player = document.getElementById("chapter-player");');
+  assert.ok(start >= 0);
+
+  for (const action of ['retry', 'switch format']) {
+    const control = () => {
+      const listeners = new Map();
+      return {
+        addEventListener(event, handler) {
+          if (!listeners.has(event)) listeners.set(event, []);
+          listeners.get(event).push(handler);
+        },
+        async emit(event) {
+          for (const handler of listeners.get(event) || []) await handler();
+        },
+        setAttribute() {},
+      };
+    };
+    const controls = new Map();
+    const get = id => {
+      if (!controls.has(id)) controls.set(id, control());
+      return controls.get(id);
+    };
+    const player = Object.assign(get('chapter-player'), {
+      currentTime: 0,
+      duration: 100,
+      readyState: 1,
+      paused: true,
+      error: null,
+      load() { this.error = null; this.currentTime = 0; },
+      play() { this.paused = false; },
+      pause() { this.paused = true; },
+    });
+    get('playback-format').value = 'opus';
+    get('playback-rate').value = '1';
+    const storage = new Map();
+    const context = vm.createContext({
+      document: {getElementById: get, addEventListener() {}},
+      window: {addEventListener() {}},
+      previewAudio: Object.assign(control(), {pause() {}}),
+      previewStatus: control(),
+      clearTimeout() {},
+      refreshLibrary() {},
+      updateChapterCastMediaSession() {},
+      localStorage: {setItem: (key, value) => storage.set(key, value)},
+      HTMLMediaElement: {HAVE_METADATA: 1},
+      Date: {now: () => 10000},
+    });
+    vm.runInContext(source.slice(start), context);
+    vm.runInContext(`
+      selected = {chapter: {id: 1}, job: {id: 2, outputs: [
+        {format: "opus", url: "/audio.opus"}, {format: "m4a", url: "/audio.m4a"}
+      ]}};
+      loadMedia(12);
+    `, context);
+    await player.emit('loadedmetadata');
+    assert.equal(player.currentTime, 12);
+    player.currentTime = 67;
+    await player.emit('timeupdate');
+    player.currentTime = 68;
+    await player.emit('timeupdate');
+    assert.equal(JSON.parse(storage.get('chaptercast-position-1-job-2')).seconds, 67);
+
+    // Some failed resources reset the media element before dispatching error.
+    player.error = {code: 2};
+    player.readyState = 0;
+    player.currentTime = 0;
+    await player.emit('error');
+    assert.equal(get('player-toggle').textContent, 'Retry');
+
+    if (action === 'retry') await vm.runInContext('playChapter()', context);
+    else {
+      get('playback-format').value = 'm4a';
+      await get('playback-format').emit('change');
+      assert.equal(player.src, '/audio.m4a?inline=true');
+    }
+    player.readyState = 1;
+    await player.emit('loadedmetadata');
+    assert.equal(player.currentTime, 68, action);
+  }
+});

@@ -703,9 +703,11 @@ function updateTime() {
 }
 function savePosition(force = false) {
   if (!selected || !saveReady || !Number.isFinite(player.currentTime)) return;
+  // Keep the live position for recovery even when a storage write is throttled.
+  restorePosition = player.ended ? 0 : player.currentTime;
   if (!force && Date.now() - lastSaved < 2000) return;
   lastSaved = Date.now();
-  writeStorage(positionKey(), {job: selected.job.id, seconds: player.ended ? 0 : player.currentTime, rate: Number(rate.value), format: format.value});
+  writeStorage(positionKey(), {job: selected.job.id, seconds: restorePosition, rate: Number(rate.value), format: format.value});
 }
 function playbackStatus(message) {
   clearTimeout(bufferingNotice);
@@ -761,10 +763,7 @@ function playFromLibrary(chapter, job) {
 }
 async function playChapter() {
   if (!selected) return;
-  if (player.error) {
-    const saved = readStorage(positionKey())?.seconds;
-    loadMedia(Number.isFinite(saved) ? saved : restorePosition);
-  }
+  if (player.error) loadMedia(restorePosition);
   previewAudio.pause();
   const load = mediaLoad;
   try {
@@ -810,6 +809,7 @@ player.addEventListener("waiting", () => {
 });
 player.addEventListener("error", () => {
   if (!selected) return;
+  if (player.readyState >= HTMLMediaElement.HAVE_METADATA) savePosition(true);
   saveReady = false;
   toggle.textContent = "Retry";
   enableSeeking(false);
@@ -840,11 +840,10 @@ player.addEventListener("ratechange", () => {
   savePosition(true);
 });
 format.addEventListener("change", () => {
-  const seconds = saveReady ? player.currentTime : restorePosition;
   const playing = !player.paused && !player.ended && !player.error;
   savePosition(true);
   player.pause();
-  loadMedia(seconds);
+  loadMedia(restorePosition);
   if (playing) playChapter();
 });
 // Preview a thumb drag locally. Seeking once at release keeps range traffic
