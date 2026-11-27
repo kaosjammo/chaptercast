@@ -542,10 +542,8 @@ function renderLibrary(data) {
   document.getElementById("queue-empty").hidden = data.jobs.length > 0;
   if (notionSelection) {
     const job = data.jobs.find(job => job.id === notionSelection.job.id);
-    if (job) {
-      notionSelection.observed = true;
-      renderNotionJob(job);
-    } else if (notionSelection.observed) {
+    if (job) renderNotionJob(job);
+    else {
       notionSelection = null;
       notionResult.hidden = true;
     }
@@ -796,10 +794,10 @@ player.addEventListener("play", () => {
 });
 player.addEventListener("playing", () => playbackStatus(""));
 player.addEventListener("pause", () => {
-  if (!player.paused) return;
+  if (!player.paused || player.error) return;
   toggle.textContent = "Play";
   savePosition(true);
-  if (!player.error) playbackStatus("");
+  playbackStatus("");
 });
 player.addEventListener("waiting", () => {
   clearTimeout(bufferingNotice);
