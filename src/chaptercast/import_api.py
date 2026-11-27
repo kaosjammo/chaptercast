@@ -16,6 +16,7 @@ from chaptercast.imports import (
     decode_text, epub_chapter, read_epub, text_chapter,
 )
 from chaptercast.jobs import GenerationSettings, JobFailure
+from chaptercast.pdf_import import pdf_chapter
 
 router = APIRouter(prefix="/api/import")
 
@@ -95,12 +96,15 @@ async def import_text(request: Request):
 async def import_upload(request: Request):
     filename = request.query_params.get("filename", "")
     extension = Path(filename).suffix.lower()
-    if extension not in {".txt", ".epub"}:
-        raise ImportFailure("unsupported_file", "Upload a UTF-8 TXT or EPUB file.")
+    if extension not in {".txt", ".epub", ".pdf"}:
+        raise ImportFailure("unsupported_file", "Upload a PDF, UTF-8 TXT or EPUB file.")
     data = await body(request, MAX_TEXT_BYTES if extension == ".txt" else MAX_UPLOAD_BYTES)
     title, exclude = options({"title": request.query_params.get("title"), "exclude_notes": request.query_params.get("exclude_notes", "false") == "true"})
     if extension == ".txt":
         chapter = text_chapter(decode_text(data), exclude)
+        return JSONResponse(await run_in_threadpool(save, request, chapter, title=title), status_code=201)
+    if extension == ".pdf":
+        chapter = await run_in_threadpool(pdf_chapter, data, filename, exclude)
         return JSONResponse(await run_in_threadpool(save, request, chapter, title=title), status_code=201)
     chapters = await run_in_threadpool(read_epub, data)
     upload_id = uuid4().hex

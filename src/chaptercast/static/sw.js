@@ -1,7 +1,7 @@
 "use strict";
 
 // Bump this version whenever the shell changes. Never add private/API/audio URLs.
-const SHELL_CACHE = "chaptercast-shell-v5";
+const SHELL_CACHE = "chaptercast-shell-v6";
 const SHELL_PATHS = ["/", "/static/style.css", "/static/app.js",
   "/static/media-session.js", "/static/manifest.webmanifest",
   "/static/icons/icon-192.png", "/static/icons/icon-512.png", "/static/icons/icon-maskable-512.png"];

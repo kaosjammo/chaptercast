@@ -10,7 +10,7 @@ function worker({failPath} = {}) {
   const cache = {put: async (key, response) => entries.set(String(key), response),
     match: async key => entries.get(String(key))};
   const context = {URL, Request, Response, caches: {open: async () => cache,
-    keys: async () => ['unrelated', 'chaptercast-shell-old', 'chaptercast-shell-v4'],
+    keys: async () => ['unrelated', 'chaptercast-shell-old', 'chaptercast-shell-v5'],
     delete: async name => requests.push({deleted: name})},
     fetch: async request => {
       requests.push(request);
@@ -55,7 +55,7 @@ test('only fixed public shell GETs enter the cache, fetched without credentials'
   let activation;
   w.handlers.activate({waitUntil: p => activation = p});
   await activation;
-  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-old'}, {deleted: 'chaptercast-shell-v4'}]);
+  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-old'}, {deleted: 'chaptercast-shell-v5'}]);
 });
 
 test('Media Session actions use the active media, clamp seeks, and report actual state', async () => {
@@ -93,13 +93,13 @@ test('Media Session actions use the active media, clamp seeks, and report actual
   assert.deepEqual(Object.keys(positions.at(-1)), []);
 });
 
-test('new shell activation removes v4 while preserving unrelated caches', async () => {
+test('new shell activation removes v5 while preserving unrelated caches', async () => {
   const w = worker();
   let activation;
   w.handlers.activate({waitUntil: promise => activation = promise});
   await activation;
   assert.deepEqual(w.requests.filter(x => x.deleted).map(x => x.deleted).sort(),
-    ['chaptercast-shell-old', 'chaptercast-shell-v4']);
+    ['chaptercast-shell-old', 'chaptercast-shell-v5']);
 });
 
 test('clearing deleted media removes actions only for that active generation', () => {
@@ -123,7 +123,7 @@ test('incomplete shell install retains the previously controlled version and nev
   let install;
   w.handlers.install({waitUntil: promise => install = promise});
   await assert.rejects(install, /Offline fixture/);
-  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-v5'}]);
+  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-v6'}]);
 });
 
 test('a fresh library read supersedes a stale status at the same offset', async () => {
