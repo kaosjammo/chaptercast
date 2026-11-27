@@ -64,6 +64,30 @@ def test_preview_is_in_queue_history_but_not_imported_library(tmp_path):
         assert library['worker']['backend_ready'] is False
 
 
+def test_library_resume_uses_the_linked_chapter_and_job_off_page(tmp_path):
+    app = create_app(Settings(data_dir=tmp_path))
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        data = {"text": "Original shared narration fixture."}
+        original = client.post("/api/import/text", json={**data, "title": "Original"}).json()
+        reprise = client.post("/api/import/text", json={**data, "title": "Reprise"}).json()
+        first = client.post("/api/jobs", json={"chapter_id": original["id"]}).json()
+        reused = client.post("/api/jobs", json={"chapter_id": reprise["id"]}).json()
+        assert reused["id"] == first["id"]
+        with connect(tmp_path / "metadata.sqlite3") as db:
+            db.execute("UPDATE jobs SET status='completed' WHERE id=?", (first["id"],))
+            db.execute("""INSERT INTO audio_outputs (job_id, format, path, byte_size, duration_seconds, sha256)
+                VALUES (?, 'm4a', 'audio/ready/fixture.m4a', 1, 1, 'fixture')""", (first["id"],))
+            db.executemany("INSERT INTO chapters (title, text_path) VALUES (?, 'uploads/new.txt')",
+                           [(f"New chapter {index}",) for index in range(21)])
+        query = {"resume_chapter": reprise["id"], "resume_job": reused["id"]}
+        library = client.get("/api/library", params=query).json()
+        assert all(c["id"] != reprise["id"] for c in library["chapters"])
+        assert library["resume"]["chapter"] == {"id": reprise["id"], "title": "Reprise"}
+        assert library["resume"]["job"]["id"] == reused["id"]
+        query["resume_chapter"] = library["chapters"][0]["id"]
+        assert client.get("/api/library", params=query).json()["resume"] is None
+
+
 def test_completed_output_range_and_safe_download_name(tmp_path):
     with TestClient(create_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
         chapter = client.post('/api/import/text', json={
@@ -89,5 +113,11 @@ def test_completed_output_range_and_safe_download_name(tmp_path):
         assert '\r' not in disposition and '\n' not in disposition
         assert '%2F' not in disposition and '%3C' not in disposition
         assert 'chapter-1-' in disposition
+        assert disposition.startswith('attachment;')
+        inline = client.head(f'{url}?inline=true')
+        assert inline.status_code == 200 and inline.content == b''
+        assert inline.headers['content-disposition'].startswith('inline;')
+        assert inline.headers['content-length'] == str(len(raw))
+        assert client.get(f'{url}?inline=true', headers={'Range': 'bytes=0-1'}).content == raw[:2]
         path.write_bytes(b'damaged')
         assert client.get(url).status_code == 404

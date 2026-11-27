@@ -10,7 +10,7 @@ function worker({failPath} = {}) {
   const cache = {put: async (key, response) => entries.set(String(key), response),
     match: async key => entries.get(String(key))};
   const context = {URL, Request, Response, caches: {open: async () => cache,
-    keys: async () => ['unrelated', 'chaptercast-shell-old', 'chaptercast-shell-v3'],
+    keys: async () => ['unrelated', 'chaptercast-shell-old', 'chaptercast-shell-v4'],
     delete: async name => requests.push({deleted: name})},
     fetch: async request => {
       requests.push(request);
@@ -55,7 +55,7 @@ test('only fixed public shell GETs enter the cache, fetched without credentials'
   let activation;
   w.handlers.activate({waitUntil: p => activation = p});
   await activation;
-  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-old'}, {deleted: 'chaptercast-shell-v3'}]);
+  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-old'}, {deleted: 'chaptercast-shell-v4'}]);
 });
 
 test('Media Session actions use the active media, clamp seeks, and report actual state', async () => {
@@ -93,13 +93,13 @@ test('Media Session actions use the active media, clamp seeks, and report actual
   assert.deepEqual(Object.keys(positions.at(-1)), []);
 });
 
-test('new shell activation removes v3 while preserving unrelated caches', async () => {
+test('new shell activation removes v4 while preserving unrelated caches', async () => {
   const w = worker();
   let activation;
   w.handlers.activate({waitUntil: promise => activation = promise});
   await activation;
   assert.deepEqual(w.requests.filter(x => x.deleted).map(x => x.deleted).sort(),
-    ['chaptercast-shell-old', 'chaptercast-shell-v3']);
+    ['chaptercast-shell-old', 'chaptercast-shell-v4']);
 });
 
 test('clearing deleted media removes actions only for that active generation', () => {
@@ -123,5 +123,126 @@ test('incomplete shell install retains the previously controlled version and nev
   let install;
   w.handlers.install({waitUntil: promise => install = promise});
   await assert.rejects(install, /Offline fixture/);
-  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-v4'}]);
+  assert.deepEqual(w.requests.filter(x => x.deleted), [{deleted: 'chaptercast-shell-v5'}]);
+});
+
+test('a fresh library read supersedes a stale status at the same offset', async () => {
+  const source = fs.readFileSync('src/chaptercast/static/app.js', 'utf8');
+  const start = source.indexOf('async function refreshLibrary(');
+  const end = source.indexOf('refreshButton.addEventListener', start);
+  assert.ok(start >= 0 && end > start);
+
+  const pending = [];
+  const rendered = [];
+  const context = {
+    URLSearchParams,
+    document: {hidden: true},
+    refreshButton: {},
+    libraryStatus: {},
+    clearTimeout: () => {},
+    importRequest: path => new Promise(resolve => pending.push({path, resolve})),
+    renderLibrary: data => rendered.push(data),
+  };
+  vm.runInNewContext(`
+    let libraryOffset = 0, libraryBusy = false, libraryPending = null, libraryRevision = 0;
+    let pollTimer, selectionRestored = true;
+    ${source.slice(start, end)}
+  `, context);
+
+  const previous = context.refreshLibrary();
+  const fresh = context.refreshLibrary(true);
+  assert.equal(pending.length, 1);
+  pending[0].resolve({jobs: [{id: 1, status: 'queued'}]});
+  await previous;
+  assert.deepEqual(rendered, []);
+
+  assert.equal(pending.length, 2);
+  assert.equal(pending[1].path, pending[0].path);
+  const completed = {jobs: [{id: 1, status: 'completed'}]};
+  pending[1].resolve(completed);
+  await fresh;
+  assert.deepEqual(rendered, [completed]);
+});
+
+test('retry and format switching preserve position after a mid-chapter stream error', async () => {
+  const source = fs.readFileSync('src/chaptercast/static/app.js', 'utf8');
+  const start = source.indexOf('const player = document.getElementById("chapter-player");');
+  assert.ok(start >= 0);
+
+  for (const action of ['retry', 'switch format']) {
+    const control = () => {
+      const listeners = new Map();
+      return {
+        addEventListener(event, handler) {
+          if (!listeners.has(event)) listeners.set(event, []);
+          listeners.get(event).push(handler);
+        },
+        async emit(event) {
+          for (const handler of listeners.get(event) || []) await handler();
+        },
+        setAttribute() {},
+      };
+    };
+    const controls = new Map();
+    const get = id => {
+      if (!controls.has(id)) controls.set(id, control());
+      return controls.get(id);
+    };
+    const player = Object.assign(get('chapter-player'), {
+      currentTime: 0,
+      duration: 100,
+      readyState: 1,
+      paused: true,
+      error: null,
+      load() { this.error = null; this.currentTime = 0; },
+      play() { this.paused = false; },
+      pause() { this.paused = true; },
+    });
+    get('playback-format').value = 'opus';
+    get('playback-rate').value = '1';
+    const storage = new Map();
+    const context = vm.createContext({
+      document: {getElementById: get, addEventListener() {}},
+      window: {addEventListener() {}},
+      previewAudio: Object.assign(control(), {pause() {}}),
+      previewStatus: control(),
+      clearTimeout() {},
+      refreshLibrary() {},
+      updateChapterCastMediaSession() {},
+      localStorage: {setItem: (key, value) => storage.set(key, value)},
+      HTMLMediaElement: {HAVE_METADATA: 1},
+      Date: {now: () => 10000},
+    });
+    vm.runInContext(source.slice(start), context);
+    vm.runInContext(`
+      selected = {chapter: {id: 1}, job: {id: 2, outputs: [
+        {format: "opus", url: "/audio.opus"}, {format: "m4a", url: "/audio.m4a"}
+      ]}};
+      loadMedia(12);
+    `, context);
+    await player.emit('loadedmetadata');
+    assert.equal(player.currentTime, 12);
+    player.currentTime = 67;
+    await player.emit('timeupdate');
+    player.currentTime = 68;
+    await player.emit('timeupdate');
+    assert.equal(JSON.parse(storage.get('chaptercast-position-1-job-2')).seconds, 67);
+
+    // Some failed resources reset the media element before dispatching error.
+    player.error = {code: 2};
+    player.readyState = 0;
+    player.currentTime = 0;
+    await player.emit('error');
+    assert.equal(get('player-toggle').textContent, 'Retry');
+
+    if (action === 'retry') await vm.runInContext('playChapter()', context);
+    else {
+      get('playback-format').value = 'm4a';
+      await get('playback-format').emit('change');
+      assert.equal(player.src, '/audio.m4a?inline=true');
+    }
+    player.readyState = 1;
+    await player.emit('loadedmetadata');
+    assert.equal(player.currentTime, 68, action);
+  }
 });

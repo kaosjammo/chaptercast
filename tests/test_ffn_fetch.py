@@ -157,7 +157,7 @@ def test_overall_deadline_interrupts_stream_even_with_small_blocks(monkeypatch, 
 
 
 def test_mixed_public_private_dns_is_rejected(monkeypatch):
-    monkeypatch.setattr(ffn.socket, "getaddrinfo", lambda *a, **kw: [(socket.AF_INET, 1, 6, "", ("8.8.8.8", 443)), (socket.AF_INET, 1, 6, "", ("10.0.0.1", 443))])
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: [(socket.AF_INET, 1, 6, "", ("8.8.8.8", 443)), (socket.AF_INET, 1, 6, "", ("10.0.0.1", 443))])
     with pytest.raises(ImportFailure) as exc:
         ffn.resolve_public("www.fanfiction.net", 3)
     assert exc.value.code == "unsafe_url"
@@ -183,8 +183,8 @@ def test_connection_pins_numeric_address_and_checks_hostname(monkeypatch):
     assert connection._context.check_hostname
     assert connection._context.verify_mode == ssl.CERT_REQUIRED
     connection._context = Context()
-    monkeypatch.setattr(ffn.socket, "socket", lambda *a: RawSocket())
-    monkeypatch.setattr(ffn.socket, "getaddrinfo", lambda *a: pytest.fail("must not resolve again"))
+    monkeypatch.setattr(socket, "socket", lambda *a: RawSocket())
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a: pytest.fail("must not resolve again"))
     connection.connect()
     assert ("connect", ("8.8.8.8", 443)) in calls
     assert ("tls_hostname", "www.fanfiction.net") in calls

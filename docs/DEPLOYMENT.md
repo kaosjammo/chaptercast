@@ -207,3 +207,22 @@ this service with `systemctl --user disable --now chaptercast.service`; retain
 private data. Remove only its installed unit if desired and daemon-reload. Do
 not disable lingering when other user services need it. Rollback does not
 authorise another route change, library deletion or a false acceptance claim.
+
+## Connect Notion
+
+Create a ChapterCast [internal Notion connection](https://developers.notion.com/guides/authorization/overview#internal-connection-auth-flow-set-up)
+for your workspace. Enable only **Read content** and leave comment and user
+information capabilities off. In Notion, open the page or parent you want to
+narrate and use **••• → Add connections** to grant the connection access.
+
+On the ChapterCast desktop, use your secret manager to place the connection
+token on one line in `$DATA_DIR/notion-token`, owned by the service user with
+mode `0600`. Keep the file out of shared folders and Git. ChapterCast reads
+it on each import, so adding or replacing the token takes effect immediately.
+The browser receives no token, and ChapterCast sends it only to Notion’s API.
+
+To qualify the connection, use a short private test page with original text.
+Copy its link from Notion and use **Create audio** on the private ChapterCast
+URL. Wait for **Ready to play** and verify playback, pause, seeking and reload
+resume. Use the actual phone to verify screen-off controls and offline
+playback from a completed M4A download.

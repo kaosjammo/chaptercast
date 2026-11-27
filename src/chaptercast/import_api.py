@@ -9,12 +9,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from chaptercast import ffn
+from chaptercast import ffn, notion
 from chaptercast.database import connect
 from chaptercast.imports import (
     Chapter, ImportFailure, MAX_TEXT_BYTES, MAX_UPLOAD_BYTES,
     decode_text, epub_chapter, read_epub, text_chapter,
 )
+from chaptercast.jobs import GenerationSettings, JobFailure
 
 router = APIRouter(prefix="/api/import")
 
@@ -28,8 +29,8 @@ async def body(request: Request, limit: int) -> bytes:
     return bytes(data)
 
 
-async def payload(request: Request) -> dict:
-    raw = await body(request, MAX_TEXT_BYTES * 2)
+async def payload(request: Request, limit: int = MAX_TEXT_BYTES * 2) -> dict:
+    raw = await body(request, limit)
     try:
         value = json.loads(raw)
     except (ValueError, UnicodeError, RecursionError) as exc:
@@ -137,3 +138,23 @@ async def import_url(request: Request):
     title, exclude = options(data)
     chapter, url = await run_in_threadpool(ffn.fetch_chapter, field(data, "url"), exclude)
     return await run_in_threadpool(save, request, chapter, source_url=url, title=title)
+
+
+@router.post("/notion", status_code=202)
+async def narrate_notion(request: Request):
+    data = await payload(request, 8192)
+    identifier = notion.page_id(field(data, "url").strip())
+    try:
+        settings = GenerationSettings(voice=data.get("voice", "bf_emma"), speed=data.get("speed", 1.0))
+    except TypeError as exc:
+        raise JobFailure("invalid_settings", "Select a supported voice and narration speed.") from exc
+    app = request.app.state
+
+    def submit_notion():
+        token = notion.read_token(app.settings.data_dir / "notion-token")
+        if app.worker.backend is None:
+            raise JobFailure("backend_unavailable", "Narration needs local voice models on your ChapterCast computer.", 503)
+        chapter = notion.NotionPage(token, app.jobs.limits.max_characters).chapter(identifier)
+        return app.jobs.enqueue_notion(chapter, f"https://www.notion.so/{identifier.hex}", settings)
+
+    return await run_in_threadpool(submit_notion)
