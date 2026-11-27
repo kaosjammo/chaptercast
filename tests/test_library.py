@@ -89,5 +89,11 @@ def test_completed_output_range_and_safe_download_name(tmp_path):
         assert '\r' not in disposition and '\n' not in disposition
         assert '%2F' not in disposition and '%3C' not in disposition
         assert 'chapter-1-' in disposition
+        assert disposition.startswith('attachment;')
+        inline = client.head(f'{url}?inline=true')
+        assert inline.status_code == 200 and inline.content == b''
+        assert inline.headers['content-disposition'].startswith('inline;')
+        assert inline.headers['content-length'] == str(len(raw))
+        assert client.get(f'{url}?inline=true', headers={'Range': 'bytes=0-1'}).content == raw[:2]
         path.write_bytes(b'damaged')
         assert client.get(url).status_code == 404

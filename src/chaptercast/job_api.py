@@ -63,8 +63,10 @@ def cancel(identifier: int, request: Request):
 
 
 @router.get("/{identifier}/outputs/{format}")
-def output(identifier: int, format: str, request: Request):
+@router.head("/{identifier}/outputs/{format}", include_in_schema=False)
+def output(identifier: int, format: str, request: Request, inline: bool = False):
     path = request.app.state.jobs.output(identifier, format)
     return FileResponse(path, media_type={"opus": "audio/ogg", "m4a": "audio/mp4"}[format],
                         filename=request.app.state.jobs.download_name(identifier, format),
+                        content_disposition_type="inline" if inline else "attachment",
                         headers={"Cache-Control": "private, no-store"})

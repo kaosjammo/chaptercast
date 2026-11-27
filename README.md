@@ -1,6 +1,6 @@
 # ChapterCast
 
-A private chapter-to-audiobook tool: submit text or a supported chapter URL from a phone, generate narration on a desktop, and play or download a compact complete chapter.
+A private chapter-to-audiobook tool. Send a Notion page, text or a supported chapter link from your phone. Your desktop generates the narration locally, ready to play or download on your phone.
 
 **Status:** implementation in progress. Local narration, player and offline shell are implemented. Portable user-service preparation and private deployment instructions are available; controller activation and deployed HTTPS acceptance remain pending.
 
@@ -106,13 +106,31 @@ entitled to process; this application does not redistribute imported works.
 
 ## Chapter import (issue #2)
 
-Use **Import a chapter** in the browser shell. Choose pasted text, a UTF-8 TXT
+### Listen to a Notion page
+
+In Notion, use **Share → Copy link** on a page that has access to your
+ChapterCast connection. Paste the link into **Listen** and tap **Create audio**.
+Stay on that screen for progress and **Play**, or return later and find it in
+your library. Play and pause, skip 15 seconds or drag the timeline. Playback
+options include speed, format and an M4A download for offline listening.
+
+The desktop needs a [one-time read-only Notion connection](docs/DEPLOYMENT.md#connect-notion).
+ChapterCast reads the page’s prose, headings, lists, quotes, callouts, toggles and
+simple tables in order, including supported nested blocks. Media, code blocks,
+linked databases and separate subpages are skipped. A page up to 100,000
+characters can be narrated as one chapter, subject to the normal generation
+limits. Submitting the same unchanged page and voice settings reuses its
+existing audio if available.
+
+### Other import sources
+
+Use the **Import** tab in the browser shell. Choose pasted text, a UTF-8 TXT
 upload, an EPUB upload or a supported FanFiction.net URL. EPUB upload first lists
 chapters in spine reading order; select one and press **Import selected chapter**.
 Only that chapter is saved. Imported metadata appears in the persistent, paginated **Library**, including
 after reload or server restart.
-Imports do not automatically enqueue narration jobs. **Generate audio** submits
-a chapter using the voice and speed selected in the preview controls.
+For these other sources, **Generate audio** submits an imported chapter using
+the voice and speed selected under **Voice & narration settings**.
 
 Blank lines preserve text paragraph boundaries; single line breaks remain within
 paragraphs. HTML block elements become paragraphs and `<br>` becomes a line break.
@@ -170,8 +188,10 @@ Import routes:
 - `POST /api/import/epub`: JSON `upload_id`, `chapter_id`, optional `title`,
   `exclude_notes`.
 - `POST /api/import/url`: JSON `url`, optional `title`, `exclude_notes`.
+- `POST /api/import/notion`: JSON `url`, optional `voice` and `speed`. Returns
+  HTTP 202 with the imported chapter and queued or reused job.
 
-Successful imports return metadata only, with HTTP 201. EPUB selection returns
+Other successful imports return metadata only, with HTTP 201. EPUB selection returns
 HTTP 200 before import. Errors return a stable `code` and a readable `message`
 without echoing submitted text. Normalised text and EPUB uploads use random names
 under the private data directory's `uploads/`; they are not served as static files.

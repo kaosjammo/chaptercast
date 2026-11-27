@@ -4,13 +4,15 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import sqlite3
 import shutil
+from uuid import uuid4
 
 from chaptercast.chunks import split_chunks
 from chaptercast.database import connect
-from chaptercast.imports import MAX_TEXT_BYTES, text_chapter
+from chaptercast.imports import Chapter, MAX_TEXT_BYTES, text_chapter
 
 PIPELINE_VERSION = "kokoro-0.9.4:82m-f3ff3571791e39611d31c381e3a41a3af07b4987:misaki-0.9.4:spacy-sm-3.8.0:pcm16-24k:opus32-cbr:aac48-fragmented:v2"
 CHUNK_CHARACTERS = 1000
@@ -111,45 +113,83 @@ class JobStore:
                 text = text_chapter(raw.decode("utf-8")).text
             except (OSError, UnicodeError) as exc:
                 raise JobFailure("missing_text", "Chapter text is unavailable or invalid.") from exc
-            if len(text) > self.limits.max_characters:
-                raise JobFailure("too_large", "Chapter exceeds the generation text limit.", 413)
-            chunks = split_chunks(text, CHUNK_CHARACTERS)
-            if len(chunks) > self.limits.max_chunks:
-                raise JobFailure("too_large", "Chapter exceeds the generation chunk limit.", 413)
-            content_key = digest(text.encode())
-            voice_key = digest(settings.voice.encode())
-            settings_json = settings.serialise()
-            settings_key = digest(settings_json.encode())
-            cache_key = digest(f"{content_key}:{voice_key}:{settings_key}".encode())
-            existing = db.execute("SELECT id, status FROM jobs WHERE cache_key = ? AND status IN ('queued','running','completed')", (cache_key,)).fetchone()
-            if existing and existing["status"] == "completed" and not self.completed_valid(db, existing["id"]):
-                db.execute("UPDATE jobs SET status='failed', error='output_integrity_failed' WHERE id=?", (existing["id"],))
-                existing = None
-            if existing:
-                db.execute("INSERT OR IGNORE INTO chapter_jobs (chapter_id, job_id) VALUES (?, ?)",
-                           (chapter_id, existing["id"]))
-                return self._get(db, existing["id"])
-            count, active, reserved = db.execute("""SELECT count(*),
-                coalesce(sum(status IN ('queued','running') OR owner IS NOT NULL), 0),
-                coalesce(sum(CASE WHEN status IN ('queued','running') OR owner IS NOT NULL THEN ? ELSE artifact_bytes END), 0)
-                FROM jobs""", (self.limits.job_bytes,)).fetchone()
-            if count >= self.limits.max_jobs:
-                raise JobFailure("quota", "The job history quota is full.", 429)
-            if active >= self.limits.max_active:
-                raise JobFailure("quota", "The active job quota is full.", 429)
-            if reserved + self.limits.job_bytes > self.limits.storage_bytes:
-                raise JobFailure("quota", "The generation storage quota is full.", 429)
-            # Keep a durable high-water mark: SQLite otherwise reuses deleted IDs.
-            identifier = db.execute("SELECT max(last_id, coalesce((SELECT max(id) FROM jobs), 0)) + 1 FROM generation_sequence WHERE singleton=1").fetchone()[0]
-            db.execute("UPDATE generation_sequence SET last_id=? WHERE singleton=1", (identifier,))
-            db.execute("""INSERT INTO jobs
-                (id, chapter_id, content_key, voice_key, settings_key, cache_key, settings_json, total_chunks)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (identifier, chapter_id, content_key, voice_key, settings_key, cache_key, settings_json, len(chunks)))
-            db.executemany("INSERT INTO job_chunks (job_id, position, text, content_key) VALUES (?, ?, ?, ?)",
-                           [(identifier, i, chunk, digest(chunk.encode())) for i, chunk in enumerate(chunks)])
-            db.execute("INSERT INTO chapter_jobs (chapter_id, job_id) VALUES (?, ?)", (chapter_id, identifier))
-            return self._get(db, identifier)
+            return self._enqueue(db, chapter_id, text, settings)
+
+    def enqueue_notion(self, chapter: Chapter, source_url: str, settings: GenerationSettings) -> dict:
+        """Reuse an unchanged page, or commit its new snapshot and job together."""
+        raw = chapter.text.encode("utf-8")
+        created = None
+        try:
+            with connect(self.database) as db:
+                db.row_factory = sqlite3.Row
+                db.execute("BEGIN IMMEDIATE")
+                for row in db.execute("""SELECT id, text_path FROM chapters
+                        WHERE source_url=? AND title=? ORDER BY id DESC""", (source_url, chapter.title)):
+                    try:
+                        with self.private_path(row["text_path"], "uploads").open("rb") as stream:
+                            matches = stream.read(len(raw) + 1) == raw
+                    except (OSError, JobFailure):
+                        continue
+                    if matches:
+                        chapter_id = row["id"]
+                        break
+                else:
+                    relative = f"uploads/{uuid4().hex}.txt"
+                    path = self.private_path(relative, "uploads")
+                    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    created = path
+                    with os.fdopen(fd, "wb") as stream:
+                        stream.write(raw)
+                    chapter_id = db.execute(
+                        "INSERT INTO chapters (title, text_path, source_url) VALUES (?, ?, ?)",
+                        (chapter.title, relative, source_url)).lastrowid
+                job = self._enqueue(db, chapter_id, chapter.text, settings)
+        except BaseException:
+            if created is not None:
+                created.unlink(missing_ok=True)
+            raise
+        return {"chapter": {"id": chapter_id, "title": chapter.title}, "job": job}
+
+    def _enqueue(self, db, chapter_id: int, text: str, settings: GenerationSettings) -> dict:
+        if len(text) > self.limits.max_characters:
+            raise JobFailure("too_large", "Chapter exceeds the generation text limit.", 413)
+        chunks = split_chunks(text, CHUNK_CHARACTERS)
+        if len(chunks) > self.limits.max_chunks:
+            raise JobFailure("too_large", "Chapter exceeds the generation chunk limit.", 413)
+        content_key = digest(text.encode())
+        voice_key = digest(settings.voice.encode())
+        settings_json = settings.serialise()
+        settings_key = digest(settings_json.encode())
+        cache_key = digest(f"{content_key}:{voice_key}:{settings_key}".encode())
+        existing = db.execute("SELECT id, status FROM jobs WHERE cache_key = ? AND status IN ('queued','running','completed')", (cache_key,)).fetchone()
+        if existing and existing["status"] == "completed" and not self.completed_valid(db, existing["id"]):
+            db.execute("UPDATE jobs SET status='failed', error='output_integrity_failed' WHERE id=?", (existing["id"],))
+            existing = None
+        if existing:
+            db.execute("INSERT OR IGNORE INTO chapter_jobs (chapter_id, job_id) VALUES (?, ?)",
+                       (chapter_id, existing["id"]))
+            return self._get(db, existing["id"])
+        count, active, reserved = db.execute("""SELECT count(*),
+            coalesce(sum(status IN ('queued','running') OR owner IS NOT NULL), 0),
+            coalesce(sum(CASE WHEN status IN ('queued','running') OR owner IS NOT NULL THEN ? ELSE artifact_bytes END), 0)
+            FROM jobs""", (self.limits.job_bytes,)).fetchone()
+        if count >= self.limits.max_jobs:
+            raise JobFailure("quota", "The job history quota is full.", 429)
+        if active >= self.limits.max_active:
+            raise JobFailure("quota", "The active job quota is full.", 429)
+        if reserved + self.limits.job_bytes > self.limits.storage_bytes:
+            raise JobFailure("quota", "The generation storage quota is full.", 429)
+        # Keep a durable high-water mark: SQLite otherwise reuses deleted IDs.
+        identifier = db.execute("SELECT max(last_id, coalesce((SELECT max(id) FROM jobs), 0)) + 1 FROM generation_sequence WHERE singleton=1").fetchone()[0]
+        db.execute("UPDATE generation_sequence SET last_id=? WHERE singleton=1", (identifier,))
+        db.execute("""INSERT INTO jobs
+            (id, chapter_id, content_key, voice_key, settings_key, cache_key, settings_json, total_chunks)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (identifier, chapter_id, content_key, voice_key, settings_key, cache_key, settings_json, len(chunks)))
+        db.executemany("INSERT INTO job_chunks (job_id, position, text, content_key) VALUES (?, ?, ?, ?)",
+                       [(identifier, i, chunk, digest(chunk.encode())) for i, chunk in enumerate(chunks)])
+        db.execute("INSERT INTO chapter_jobs (chapter_id, job_id) VALUES (?, ?)", (chapter_id, identifier))
+        return self._get(db, identifier)
 
     def _get(self, db, identifier: int) -> dict:
         job = db.execute("""SELECT id, chapter_id, status, content_key, voice_key, settings_key, cache_key,

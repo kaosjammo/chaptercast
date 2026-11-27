@@ -3,40 +3,59 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
 <meta content="light dark" name="color-scheme"/>
 <meta content="#305843" name="theme-color"/>
 <title>ChapterCast</title>
 <link href="/static/manifest.webmanifest" rel="manifest"/>
 <link href="/static/icons/icon-192.png" rel="icon" type="image/png"/>
+<link href="/static/icons/icon-192.png" rel="apple-touch-icon"/>
 <link href="/static/style.css" rel="stylesheet"/>
 <script defer="" src="/static/media-session.js"></script>
 <script defer="" src="/static/app.js"></script>
 </head>
 <body>
 <main><header class="app-header">
-<div class="brand"><h1>ChapterCast</h1><details id="help"><summary>Help &amp; connection</summary><div id="help-content"><section aria-labelledby="offline-heading">
+<div class="brand"><h1>ChapterCast</h1><details id="help"><summary>Help</summary><div id="help-content"><section aria-labelledby="offline-heading">
 <h2 id="offline-heading">Install and listen offline</h2>
 <p id="shell-status" role="status">Preparing the offline shell…</p>
 
 <p class="hint" id="offline-limits">Only the app interface is saved offline. Library updates, imports, generation, streaming and new downloads need the server. Nothing submitted offline is queued or retried automatically.</p>
-<p class="hint">On Android, use your browser’s Install app or Add to Home screen option when offered. Download M4A for broad player compatibility, or Opus if your player supports it. Wait for the browser’s download to finish, then open the saved file from Downloads in your audio player. Downloaded files stay on your device; buffered streaming is not an offline download.</p>
+<p class="hint">On iPhone, open Safari’s Share menu and choose Add to Home Screen. On Android, look for Install app or Add to Home screen in your browser menu. To listen offline, download the M4A and open it in your device’s audio player.</p>
 </section><section aria-labelledby="connection-heading">
 <h2 id="connection-heading">Server connection</h2>
 <p aria-live="polite" id="connection-status" role="status">Checking connection…</p>
 <button id="check-connection" type="button">Check connection</button>
 <noscript><p>Enable JavaScript to check the connection, or visit <a href="/health">server health</a>.</p></noscript>
 </section></div></details></div>
-<nav aria-label="Workspace" role="tablist"><button aria-controls="view-library" aria-selected="true" id="tab-library" role="tab" type="button">Library</button><button aria-controls="view-generate" aria-selected="false" id="tab-generate" role="tab" tabindex="-1" type="button">Generate</button><button aria-controls="view-activity" aria-selected="false" id="tab-activity" role="tab" tabindex="-1" type="button">Activity <span hidden="" id="activity-count"></span></button></nav>
+<nav aria-label="Workspace" role="tablist"><button aria-controls="view-library" aria-selected="true" id="tab-library" role="tab" type="button">Listen</button><button aria-controls="view-generate" aria-selected="false" id="tab-generate" role="tab" tabindex="-1" type="button">Import</button><button aria-controls="view-activity" aria-selected="false" id="tab-activity" role="tab" tabindex="-1" type="button">Activity <span hidden="" id="activity-count"></span></button></nav>
 <p hidden="" id="offline-status" role="status"></p><p hidden="" id="shell-update" role="status">New interface available. Reload when ready: unsaved input resets and playback stops. <button id="reload-shell" type="button">Reload interface</button></p>
 </header><div hidden="" id="active-progress"><button id="show-activity" type="button">View activity</button><div><p id="active-label"></p><progress aria-labelledby="active-label" id="active-bar" max="1" value="0"></progress></div></div>
-<div class="workspace" id="workspace"><section aria-labelledby="tab-library" id="view-library" role="tabpanel" tabindex="0"><section aria-labelledby="library-heading" class="view-content">
+<div class="workspace" id="workspace"><section aria-labelledby="tab-library" id="view-library" role="tabpanel" tabindex="0">
+<section aria-labelledby="notion-heading" class="notion-composer">
+<h2 id="notion-heading">Listen to a Notion page</h2>
+<form id="notion-form">
+<label class="visually-hidden" for="notion-url">Notion page link</label>
+<div class="notion-fields">
+<input autocapitalize="none" autocomplete="off" enterkeyhint="go" id="notion-url" inputmode="url" maxlength="2048" placeholder="Paste a Notion page link" required spellcheck="false" type="url"/>
+<button id="notion-submit" type="submit">Create audio</button>
+</div>
+</form>
+<p id="notion-status" role="status"></p>
+<div class="notion-result" hidden id="notion-result">
+<div><h3 id="notion-title"></h3><p id="notion-progress-label" role="status"></p></div>
+<button hidden id="notion-play" type="button">Play</button>
+<button hidden id="notion-retry" type="button">Create again</button>
+<progress aria-labelledby="notion-progress-label" hidden id="notion-progress" max="1" value="0"></progress>
+</div>
+</section>
+<section aria-labelledby="library-heading" class="view-content">
 <div class="section-heading"><h2 id="library-heading">Library</h2><button id="refresh-library" type="button">Refresh</button></div>
 
 <p aria-live="polite" id="library-status" role="status">Loading library…</p>
 <ul class="cards" id="library-list"></ul>
-<div class="actions"><button disabled="" id="library-previous" type="button">Previous page</button><span id="library-page"></span><button disabled="" id="library-next" type="button">Next page</button></div>
-</section></section><section aria-labelledby="tab-generate" hidden="" id="view-generate" role="tabpanel" tabindex="0"><h2>Generate</h2><p class="hint">Import a chapter, then generate from your library using these voice settings.</p><section aria-labelledby="import-heading" class="view-content">
+<div class="actions" hidden id="library-pagination"><button disabled="" id="library-previous" type="button">Previous page</button><span id="library-page"></span><button disabled="" id="library-next" type="button">Next page</button></div>
+</section></section><section aria-labelledby="tab-generate" hidden="" id="view-generate" role="tabpanel" tabindex="0"><section aria-labelledby="import-heading" class="view-content">
 <h2 id="import-heading">Import a chapter</h2>
 <p>Paste text, upload UTF-8 TXT or choose a chapter from an EPUB. FFN may block URL imports; paste and upload remain available.</p>
 <form id="import-form">
@@ -102,11 +121,8 @@
 <p id="queue-empty">No generations yet.</p>
 <p aria-live="polite" id="generation-status" role="status"></p>
 </section></section></div><section aria-labelledby="player-heading" class="player" hidden="" id="player-section">
-<h2 class="visually-hidden" id="player-heading">Chapter player</h2><div class="player-top"><h3 id="player-title" tabindex="-1"></h3><div class="actions">
-<button disabled="" id="player-toggle" type="button">Play</button>
-<button aria-label="Back 15 seconds" disabled="" id="skip-back" type="button">−15s</button>
-<button aria-label="Forward 15 seconds" disabled="" id="skip-forward" type="button">+15s</button>
-</div></div>
+<h2 class="visually-hidden" id="player-heading">Chapter player</h2>
+<h3 id="player-title" tabindex="-1"></h3>
 
 
 <audio hidden="" id="chapter-player" preload="metadata"></audio>
@@ -115,10 +131,15 @@
 <input disabled="" id="seek" max="1" min="0" step="0.1" type="range" value="0"/>
 <p class="player-time" id="player-time">Loading duration…</p>
 
+<div class="transport">
+<button aria-label="Back 15 seconds" disabled id="skip-back" type="button">−15s</button>
+<button id="player-toggle" type="button">Play</button>
+<button aria-label="Forward 15 seconds" disabled id="skip-forward" type="button">+15s</button>
+</div>
 <p aria-live="polite" class="player-feedback" id="player-status" role="status"></p>
 
 
-<details id="player-more"><summary>Speed, format &amp; downloads</summary><div class="settings-row">
+<details id="player-more"><summary>Playback options</summary><div class="settings-row">
 <div><label for="playback-rate">Playback speed</label>
 <select id="playback-rate">
 <option value="0.5">0.5×</option><option value="0.75">0.75×</option>

@@ -5,6 +5,7 @@ const button = document.getElementById("check-connection");
 let serverAvailable = navigator.onLine;
 const views = ["library", "generate", "activity"];
 function showView(name, focus = false) {
+  const changed = document.getElementById(`view-${name}`).hidden;
   for (const view of views) {
     const active = view === name;
     document.getElementById(`view-${view}`).hidden = !active;
@@ -12,6 +13,8 @@ function showView(name, focus = false) {
     tab.setAttribute("aria-selected", String(active));
     tab.tabIndex = active ? 0 : -1;
   }
+  if (changed) document.getElementById("workspace").scrollTop = 0;
+  syncActivityBanner();
   document.getElementById("help").open = false;
   if (focus) document.getElementById(`tab-${name}`).focus();
 }
@@ -151,6 +154,67 @@ async function importRequest(path, init) {
   return data;
 }
 
+const notionForm = document.getElementById("notion-form");
+const notionUrl = document.getElementById("notion-url");
+const notionSubmit = document.getElementById("notion-submit");
+const notionStatus = document.getElementById("notion-status");
+const notionResult = document.getElementById("notion-result");
+const notionLabel = document.getElementById("notion-progress-label");
+const notionProgress = document.getElementById("notion-progress");
+const notionPlay = document.getElementById("notion-play");
+const notionRetry = document.getElementById("notion-retry");
+let notionSelection = null;
+
+function renderNotionJob(job) {
+  notionSelection.job = job;
+  const active = job.status === "queued" || job.status === "running";
+  const ready = job.status === "completed" && job.outputs.length > 0;
+  let label = "Audio unavailable";
+  if (job.status === "queued") label = "Queued for narration";
+  if (job.status === "running") label = job.progress === 1 ? "Finalising audio" : `Creating audio · ${Math.floor(job.progress * 100)}%`;
+  if (job.status === "cancelled") label = "Narration cancelled";
+  if (ready) label = "Ready to play";
+  if (notionLabel.textContent !== label) notionLabel.textContent = label;
+  notionProgress.hidden = !active;
+  notionProgress.value = job.progress;
+  notionPlay.hidden = !ready;
+  notionRetry.hidden = active || ready;
+}
+notionPlay.addEventListener("click", () => playFromLibrary(notionSelection.chapter, notionSelection.job));
+notionRetry.addEventListener("click", () => createNotionAudio(notionSelection.link));
+notionUrl.addEventListener("input", () => { notionUrl.removeAttribute("aria-invalid"); });
+notionForm.addEventListener("submit", event => {
+  event.preventDefault();
+  createNotionAudio(notionUrl.value.trim());
+});
+async function createNotionAudio(link) {
+  if (notionSubmit.disabled) return;
+  notionRetry.disabled = notionSubmit.disabled = true;
+  notionStatus.textContent = "Reading your Notion page…";
+  try {
+    const result = await importRequest("/api/import/notion", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({url: link, ...narrationSettings()}),
+    });
+    notionSelection = {...result, link};
+    if (notionUrl.value.trim() === link) {
+      notionUrl.value = "";
+      notionUrl.blur();
+    }
+    notionStatus.textContent = "";
+    document.getElementById("notion-title").textContent = notionSelection.chapter.title;
+    notionResult.hidden = false;
+    renderNotionJob(notionSelection.job);
+    libraryOffset = 0;
+    refreshLibrary(true);
+  } catch (error) {
+    notionStatus.textContent = error.message;
+    if (error.code === "invalid_notion_link") notionUrl.setAttribute("aria-invalid", "true");
+  } finally {
+    notionRetry.disabled = notionSubmit.disabled = false;
+  }
+}
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   submit.disabled = true;
@@ -216,10 +280,17 @@ let libraryOffset = 0;
 let libraryBusy = false;
 let libraryPending = null;
 let pollTimer;
+let activeJob = null;
 let previewJob = null;
 let previewLoaded = null;
 const chapterCards = new Map();
 const queueCards = new Map();
+
+function syncActivityBanner() {
+  const progressShownInNotion = !notionProgress.hidden && !notionResult.hidden
+    && !document.getElementById("view-library").hidden && notionSelection?.job.id === activeJob?.id;
+  document.getElementById("active-progress").hidden = !activeJob || progressShownInNotion;
+}
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -252,6 +323,9 @@ function downloadLinks(container, job) {
     return link;
   }));
 }
+function narrationSettings() {
+  return {voice: document.getElementById("voice").value, speed: Number(document.getElementById("speed").value)};
+}
 async function generateAudio(path, extra, preview) {
   showView(preview ? "generate" : "activity", true);
   if (preview) document.getElementById("voice-settings").open = true;
@@ -263,8 +337,7 @@ async function generateAudio(path, extra, preview) {
     if (!worker.backend_ready) throw new Error("Local narration needs the tts extra and chaptercast-models setup. Imported chapters remain in your library.");
     const job = await importRequest(path, {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({...extra, voice: document.getElementById("voice").value,
-        speed: Number(document.getElementById("speed").value), formats: ["opus", "m4a"]}),
+      body: JSON.stringify({...extra, ...narrationSettings(), formats: ["opus", "m4a"]}),
     });
     if (preview) {
       previewJob = job.id;
@@ -347,7 +420,7 @@ function generationCard(job, chapter) {
   const progress = element("progress");
   progress.max = 1;
   const controls = element("div", undefined, "actions");
-  const play = action("Play", () => openPlayer(card.chapter, card.job));
+  const play = action("Play", () => playFromLibrary(card.chapter, card.job));
   const cancel = action("Cancel first", () => cancelJob(card.job.id, generationStatus));
   const remove = action("Delete generation", () => confirmDelete(card.job, card.chapter.title, remove));
   const downloads = element("div", undefined, "actions");
@@ -394,8 +467,9 @@ function renderLibrary(data) {
       const description = element("p");
       const controls = element("div", undefined, "actions");
       const generate = action("Generate audio", () => generateAudio("/api/jobs", {chapter_id: chapter.id}, false));
-      const play = action("Open player", () => openPlayer(card.chapter, card.ready));
-      controls.append(generate, play);
+      const play = action("Play", () => playFromLibrary(card.chapter, card.ready));
+      generate.classList.add("secondary");
+      controls.append(play, generate);
       const generations = element("details", undefined, "generation-list");
       const summary = element("summary");
       const list = element("ul");
@@ -420,14 +494,20 @@ function renderLibrary(data) {
     card.ready = chapter.jobs.find(job => job.status === "completed" && job.outputs.length);
     card.title.textContent = chapter.title;
     card.description.textContent = jobDescription(chapter.jobs[0]);
-    card.generate.disabled = chapter.jobs.some(job => ["queued", "running"].includes(job.status));
+    const generating = chapter.jobs.some(job => ["queued", "running"].includes(job.status));
+    // Preserve a focused button if polling catches admission before the user moves on.
+    card.generate.disabled = generating;
+    card.generate.hidden = generating && document.activeElement !== card.generate;
     card.play.hidden = !card.ready;
-    card.play.textContent = card.ready && chapter.jobs[0].id !== card.ready.id ? "Open previous audio" : "Open player";
+    card.play.textContent = card.ready && chapter.jobs[0].id !== card.ready.id ? "Play previous audio" : "Play";
+    card.play.setAttribute("aria-label", `${card.play.textContent} – ${chapter.title}`);
     // Moving only when necessary preserves focus during polling.
     if (libraryList.children[ data.chapters.indexOf(chapter) ] !== card.item) libraryList.append(card.item);
   }
-  libraryStatus.textContent = data.total ? `${data.total} imported chapter${data.total === 1 ? "" : "s"}.` : "Your library is empty. Open Generate to import a chapter.";
+  const libraryMessage = data.total ? `${data.total} chapter${data.total === 1 ? "" : "s"}` : "Audio you create will appear here.";
+  if (libraryStatus.textContent !== libraryMessage) libraryStatus.textContent = libraryMessage;
   document.getElementById("library-page").textContent = data.total ? `${libraryOffset + 1}–${Math.min(libraryOffset + data.limit, data.total)} of ${data.total}` : "";
+  document.getElementById("library-pagination").hidden = libraryOffset === 0 && data.total <= data.limit;
   document.getElementById("library-previous").disabled = libraryOffset === 0;
   document.getElementById("library-next").disabled = libraryOffset + data.limit >= data.total;
   const worker = data.worker;
@@ -436,11 +516,10 @@ function renderLibrary(data) {
   const count = document.getElementById("activity-count");
   count.textContent = `(${active.length})`;
   count.hidden = !active.length;
-  document.getElementById("active-progress").hidden = !active.length;
-  if (active.length) {
-    const current = active.find(job => job.status === "running") || active.at(-1);
-    document.getElementById("active-label").textContent = `#${current.id} · ${current.status === "queued" ? "Queued" : current.progress === 1 ? "Finalising" : "Synthesising"} · ${Math.floor(current.progress * 100)}% synthesis · ${current.completed_chunks}/${current.total_chunks} chunks`;
-    document.getElementById("active-bar").value = current.progress;
+  activeJob = active.find(job => job.status === "running") || active.at(-1);
+  if (activeJob) {
+    document.getElementById("active-label").textContent = `${activeJob.title} · ${activeJob.status === "queued" ? "Queued" : activeJob.progress === 1 ? "Finalising audio" : `Creating audio · ${Math.floor(activeJob.progress * 100)}%`}`;
+    document.getElementById("active-bar").value = activeJob.progress;
   }
   const ordered = [...data.jobs].sort((a, b) => Number(["queued", "running"].includes(b.status)) - Number(["queued", "running"].includes(a.status)) || b.id - a.id);
   const idsInQueue = new Set(ordered.map(job => job.id));
@@ -460,6 +539,17 @@ function renderLibrary(data) {
     if (queueList.children[index] !== card.item) queueList.insertBefore(card.item, queueList.children[index] || null);
   }
   document.getElementById("queue-empty").hidden = data.jobs.length > 0;
+  if (notionSelection) {
+    const job = data.jobs.find(job => job.id === notionSelection.job.id);
+    if (job) {
+      notionSelection.observed = true;
+      renderNotionJob(job);
+    } else if (notionSelection.observed) {
+      notionSelection = null;
+      notionResult.hidden = true;
+    }
+  }
+  syncActivityBanner();
   if (selected && !data.jobs.some(job => job.id === selected.job.id && job.status === "completed" && job.outputs.length)) {
     forgetGeneration(selected.job);
     libraryStatus.textContent = "The selected generation is no longer available. Chapter text is retained; choose another generation or generate again.";
@@ -472,7 +562,7 @@ function renderLibrary(data) {
     previewStatus.textContent = jobDescription(preview);
     if (preview.status === "completed" && preview.outputs.length && previewLoaded !== preview.id) {
       previewLoaded = preview.id;
-      previewAudio.src = preferredOutput(preview).url;
+      previewAudio.src = streamUrl(preferredOutput(preview));
       previewAudio.hidden = false;
       downloadLinks(document.getElementById("generation-downloads"), preview);
     }
@@ -498,21 +588,22 @@ async function refreshLibrary(fresh = false) {
   libraryBusy = true;
   refreshButton.disabled = true;
   clearTimeout(pollTimer);
+  const offset = libraryOffset;
   try {
-    const data = await importRequest(`/api/library?offset=${libraryOffset}&limit=20`, {});
-    renderLibrary(data);
+    const data = await importRequest(`/api/library?offset=${offset}&limit=20`, {});
+    if (offset === libraryOffset) renderLibrary(data);
   } catch (error) {
     libraryStatus.textContent = `${error.message} Library updates paused; submitted jobs continue on the server. Refresh to reconnect.`;
   } finally {
     libraryBusy = false;
     resolvePending();
     refreshButton.disabled = false;
-    pollTimer = setTimeout(refreshLibrary, 2500);
+    if (!document.hidden) pollTimer = setTimeout(refreshLibrary, activeJob ? 2000 : 12000);
   }
 }
-refreshButton.addEventListener("click", () => refreshLibrary());
-document.getElementById("library-previous").addEventListener("click", () => { libraryOffset = Math.max(0, libraryOffset - 20); refreshLibrary(); });
-document.getElementById("library-next").addEventListener("click", () => { libraryOffset += 20; refreshLibrary(); });
+refreshButton.addEventListener("click", () => refreshLibrary(true));
+document.getElementById("library-previous").addEventListener("click", () => { libraryOffset = Math.max(0, libraryOffset - 20); refreshLibrary(true); });
+document.getElementById("library-next").addEventListener("click", () => { libraryOffset += 20; refreshLibrary(true); });
 
 const player = document.getElementById("chapter-player");
 const playerSection = document.getElementById("player-section");
@@ -522,11 +613,16 @@ const seek = document.getElementById("seek");
 const rate = document.getElementById("playback-rate");
 const format = document.getElementById("playback-format");
 const toggle = document.getElementById("player-toggle");
+const skipBack = document.getElementById("skip-back");
+const skipForward = document.getElementById("skip-forward");
 let selected = null;
 let selectionRestored = false;
 let restorePosition = 0;
 let saveReady = false;
 let lastSaved = 0;
+let mediaLoad = 0;
+let bufferingNotice;
+let scrubbing = false;
 function readStorage(key) {
   try { return JSON.parse(localStorage.getItem(key)); }
   catch { positionStatus.textContent = "Browser storage is unavailable. Position cannot be restored after reload."; return null; }
@@ -549,6 +645,7 @@ function forgetGeneration(job) {
     player.pause();
     player.removeAttribute("src");
     player.load();
+    playbackStatus("");
     clearChapterCastMediaSession(player);
     playerSection.hidden = true;
     document.getElementById("player-downloads").replaceChildren();
@@ -577,6 +674,9 @@ function forgetGeneration(job) {
 function preferredOutput(job) {
   return job.outputs.find(output => output.format === (player.canPlayType('audio/ogg; codecs="opus"') ? "opus" : "m4a")) || job.outputs[0];
 }
+function streamUrl(output) {
+  return `${output.url}?inline=true`;
+}
 function timeLabel(seconds) {
   const value = Math.max(0, Math.floor(seconds || 0));
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
@@ -584,9 +684,10 @@ function timeLabel(seconds) {
 function updateTime() {
   const duration = Number.isFinite(player.duration) ? player.duration : 0;
   seek.max = duration || 1;
-  seek.value = player.currentTime;
-  seek.setAttribute("aria-valuetext", `${timeLabel(player.currentTime)} of ${timeLabel(duration)}`);
-  document.getElementById("player-time").textContent = `${timeLabel(player.currentTime)} / ${duration ? timeLabel(duration) : "Loading…"}`;
+  if (!scrubbing) seek.value = player.currentTime;
+  const current = timeLabel(Number(seek.value));
+  seek.setAttribute("aria-valuetext", `${current} of ${timeLabel(duration)}`);
+  document.getElementById("player-time").textContent = `${current} / ${duration ? timeLabel(duration) : "—"}`;
 }
 function savePosition(force = false) {
   if (!selected || !saveReady || !Number.isFinite(player.currentTime)) return;
@@ -594,22 +695,30 @@ function savePosition(force = false) {
   lastSaved = Date.now();
   writeStorage(positionKey(), {job: selected.job.id, seconds: player.ended ? 0 : player.currentTime, rate: Number(rate.value), format: format.value});
 }
+function playbackStatus(message) {
+  clearTimeout(bufferingNotice);
+  if (playerStatus.textContent !== message) playerStatus.textContent = message;
+}
+function enableSeeking(enabled) {
+  seek.disabled = skipBack.disabled = skipForward.disabled = !enabled;
+}
 function loadMedia(seconds) {
   previewAudio.pause();
   saveReady = false;
+  scrubbing = false;
+  mediaLoad += 1;
   restorePosition = seconds;
-  playerStatus.textContent = "Loading chapter audio…";
-  for (const control of [toggle, seek, document.getElementById("skip-back"), document.getElementById("skip-forward")]) control.disabled = true;
-  player.src = selected.job.outputs.find(output => output.format === format.value).url;
+  playbackStatus("");
+  toggle.textContent = "Play";
+  enableSeeking(false);
+  player.src = streamUrl(selected.job.outputs.find(output => output.format === format.value));
+  player.defaultPlaybackRate = Number(rate.value);
   player.load();
-  setChapterCastMediaSession(player, selected.chapter.title, () => {
-    playerStatus.textContent = "Playback could not start. Press Play or download the complete file.";
-  });
+  updateTime();
 }
 function openPlayer(chapter, job, focus = true) {
   if (!job) return;
   if (selected?.chapter.id === chapter.id && selected.job.id === job.id) {
-    if (player.error) loadMedia(readStorage(positionKey())?.seconds || 0);
     if (focus) toggle.focus();
     return;
   }
@@ -630,42 +739,73 @@ function openPlayer(chapter, job, focus = true) {
   playerSection.hidden = false;
   writeStorage("chaptercast-selected", {id: chapter.id, job: job.id, offset: libraryOffset});
   loadMedia(Number.isFinite(saved?.seconds) && saved.seconds > 0 ? saved.seconds : 0);
-  if (focus) document.getElementById("player-title").focus();
+  if (focus) toggle.focus();
 }
-player.addEventListener("loadedmetadata", () => {
-  if (!selected || !Number.isFinite(player.duration) || player.duration <= 0) return;
-  player.playbackRate = Number(rate.value);
-  player.currentTime = Math.min(restorePosition, Math.max(0, player.duration - 0.1));
-  saveReady = true;
-  for (const control of [toggle, seek, document.getElementById("skip-back"), document.getElementById("skip-forward")]) control.disabled = false;
-  playerStatus.textContent = restorePosition > 0 ? `Restored position at ${timeLabel(player.currentTime)}. Press Play to continue.` : "Ready. Press Play to start streaming.";
-  updateTime();
-});
-toggle.addEventListener("click", async () => {
-  if (!player.paused) player.pause();
-  else {
-    previewAudio.pause();
-    try { await player.play(); }
-    catch { playerStatus.textContent = "Playback could not start. Try Play again, change format, or download the file."; }
+function playFromLibrary(chapter, job) {
+  if (!job) return;
+  openPlayer(chapter, job);
+  if (player.paused || player.ended || player.error) playChapter();
+}
+async function playChapter() {
+  if (!selected) return;
+  if (player.error) loadMedia(readStorage(positionKey())?.seconds || restorePosition);
+  previewAudio.pause();
+  const load = mediaLoad;
+  try {
+    await player.play();
+  } catch (error) {
+    if (load === mediaLoad && error.name !== "AbortError" && !player.error) {
+      playbackStatus("Could not start playback. Try Play again or download the audio.");
+    }
   }
+}
+function restorePlayback() {
+  if (!selected || saveReady || !Number.isFinite(player.duration) || player.duration <= 0) return;
+  player.playbackRate = Number(rate.value);
+  if (restorePosition > 0) player.currentTime = Math.min(restorePosition, Math.max(0, player.duration - 0.1));
+  saveReady = true;
+  enableSeeking(true);
+  updateTime();
+}
+player.addEventListener("loadedmetadata", restorePlayback);
+player.addEventListener("durationchange", restorePlayback);
+toggle.addEventListener("click", () => {
+  if (!player.paused && !player.ended && !player.error) player.pause();
+  else playChapter();
 });
 player.addEventListener("play", () => {
   previewAudio.pause(); toggle.textContent = "Pause";
   setChapterCastMediaSession(player, selected?.chapter.title || "Chapter audio", () => {
-    playerStatus.textContent = "Playback could not start. Press Play or download the complete file.";
+    playbackStatus("Could not start playback. Try Play again or download the audio.");
   });
 });
-player.addEventListener("playing", () => { playerStatus.textContent = "Playing from this server."; });
-player.addEventListener("pause", () => { toggle.textContent = "Play"; savePosition(true); if (saveReady) playerStatus.textContent = "Paused."; });
-player.addEventListener("waiting", () => { if (saveReady) playerStatus.textContent = "Buffering audio from this server…"; });
+player.addEventListener("playing", () => playbackStatus(""));
+player.addEventListener("pause", () => {
+  if (!player.paused) return;
+  toggle.textContent = "Play";
+  savePosition(true);
+  if (!player.error) playbackStatus("");
+});
+player.addEventListener("waiting", () => {
+  clearTimeout(bufferingNotice);
+  if (!player.paused) bufferingNotice = setTimeout(() => {
+    if (!player.paused && player.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) playbackStatus("Buffering audio…");
+  }, 650);
+});
 player.addEventListener("error", () => {
+  if (!selected) return;
   saveReady = false;
-  for (const control of [toggle, seek, document.getElementById("skip-back"), document.getElementById("skip-forward")]) control.disabled = true;
-  playerStatus.textContent = "Audio could not be loaded. Check the server connection, reopen the player, or choose another format. Downloads also require a completed, intact file.";
+  toggle.textContent = "Retry";
+  enableSeeking(false);
+  playbackStatus("Audio could not load. Retry, or choose another format under Playback options.");
 });
 player.addEventListener("timeupdate", () => { updateTime(); savePosition(); });
 player.addEventListener("seeked", () => savePosition(true));
-player.addEventListener("ended", () => { savePosition(true); playerStatus.textContent = "Chapter finished. Saved position reset to the beginning."; });
+player.addEventListener("ended", () => {
+  toggle.textContent = "Play";
+  savePosition(true);
+  playbackStatus("Chapter finished.");
+});
 previewAudio.addEventListener("play", () => {
   player.pause();
   setChapterCastMediaSession(previewAudio, "British voice preview", () => {
@@ -683,11 +823,33 @@ player.addEventListener("ratechange", () => {
   if ([...rate.options].some(option => Number(option.value) === player.playbackRate)) rate.value = String(player.playbackRate);
   savePosition(true);
 });
-format.addEventListener("change", () => { const seconds = player.currentTime; savePosition(true); player.pause(); loadMedia(seconds); });
-seek.addEventListener("input", () => { if (saveReady) player.currentTime = Math.min(Number(seek.value), player.duration); });
-for (const [id, delta] of [["skip-back", -15], ["skip-forward", 15]]) {
-  document.getElementById(id).addEventListener("click", () => { if (saveReady) player.currentTime = Math.max(0, Math.min(player.duration, player.currentTime + delta)); });
+format.addEventListener("change", () => {
+  const seconds = saveReady ? player.currentTime : restorePosition;
+  const playing = !player.paused && !player.ended && !player.error;
+  savePosition(true);
+  player.pause();
+  loadMedia(seconds);
+  if (playing) playChapter();
+});
+// Preview a thumb drag locally. Seeking once at release keeps range traffic
+// and decoder resets out of the middle of the gesture.
+seek.addEventListener("input", () => { scrubbing = true; updateTime(); });
+seek.addEventListener("change", () => {
+  if (saveReady) player.currentTime = Math.min(Number(seek.value), player.duration);
+  scrubbing = false;
+  updateTime();
+});
+seek.addEventListener("pointercancel", () => { scrubbing = false; updateTime(); });
+for (const [control, delta] of [[skipBack, -15], [skipForward, 15]]) {
+  control.addEventListener("click", () => {
+    if (saveReady) player.currentTime = Math.max(0, Math.min(player.duration, player.currentTime + delta));
+  });
 }
 window.addEventListener("pagehide", () => savePosition(true));
-document.addEventListener("visibilitychange", () => { if (document.hidden) savePosition(true); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    clearTimeout(pollTimer);
+    savePosition(true);
+  } else refreshLibrary(true);
+});
 refreshLibrary();
