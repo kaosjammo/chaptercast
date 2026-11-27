@@ -1,6 +1,7 @@
 """Original PDF fixtures and local import checks."""
 
 import shutil
+import sys
 
 from fastapi.testclient import TestClient
 import pytest
@@ -11,7 +12,7 @@ from chaptercast.config import Settings
 from chaptercast.database import connect
 
 
-def pdf_bytes(*streams: bytes) -> bytes:
+def pdf_bytes(*streams: bytes, compressed: tuple[int, ...] = ()) -> bytes:
     """Build an original PDF from one content stream per page."""
     page_refs = " ".join(f"{4 + i * 2} 0 R" for i in range(len(streams)))
     objects = [
@@ -20,10 +21,11 @@ def pdf_bytes(*streams: bytes) -> bytes:
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
     ]
     for i, stream in enumerate(streams):
+        filter_entry = "/Filter /FlateDecode " if i in compressed else ""
         objects.extend([
             (f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
              f"/Resources << /Font << /F1 3 0 R >> >> /Contents {5 + i * 2} 0 R >>").encode(),
-            f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream",
+            f"<< {filter_entry}/Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream",
         ])
     output = bytearray(b"%PDF-1.4\n")
     offsets = []
@@ -43,7 +45,8 @@ ORIGINAL_PDF = pdf_bytes(
     b"BT /F1 14 Tf 72 600 Td (A/N: Original note.) Tj ET",
     b"BT /F1 16 Tf 72 720 Td (The second page begins here.) Tj ET",
 )
-IMAGE_PDF = pdf_bytes(b"q 60 0 0 60 70 520 cm BI /W 1 /H 1 /CS /G /BPC 8 ID \xff\nEI Q")
+IMAGE_STREAM = b"q 60 0 0 60 70 520 cm BI /W 1 /H 1 /CS /G /BPC 8 ID \xff\nEI Q"
+IMAGE_PDF = pdf_bytes(IMAGE_STREAM)
 
 
 @pytest.fixture
@@ -54,7 +57,7 @@ def client(tmp_path):
 
 @pytest.fixture
 def poppler():
-    if not shutil.which("pdftotext"):
+    if not all(shutil.which(tool) for tool in ("pdftotext", "pdfimages")):
         pytest.skip("Poppler is required for real PDF extraction")
 
 
@@ -109,3 +112,41 @@ def test_pdf_extractor_times_out_without_importing_partial_text(client, tmp_path
     assert (response.status_code, response.json()["code"]) == (400, "pdf_timeout")
     assert client.get("/api/library").json()["total"] == 0
     assert list((tmp_path / "uploads").iterdir()) == []
+
+
+def test_damaged_page_reported_even_if_poppler_returns_partial_text(client, poppler):
+    data = pdf_bytes(b"BT /F1 16 Tf 72 720 Td (This text is readable.) Tj ET",
+                     b"Invalid compressed stream", compressed=(1,))
+    response = client.post("/api/import/upload?filename=Damaged.pdf", content=data)
+    assert (response.status_code, response.json()["code"]) == (400, "unreadable_pdf")
+    assert client.get("/api/library").json()["total"] == 0
+
+
+def test_mixed_scan_reports_page_number_but_blank_pages_and_literal_tags_import(client, tmp_path, poppler):
+    first = b"BT /F1 16 Tf 72 720 Td (The <body> element is literal prose.) Tj ET"
+    last = b"BT /F1 16 Tf 72 720 Td (This is the last page.) Tj ET"
+    mixed = client.post("/api/import/upload?filename=Mixed.pdf", content=pdf_bytes(first, b"", IMAGE_STREAM, last))
+    assert (mixed.status_code, mixed.json()["code"]) == (400, "pdf_needs_ocr")
+    assert "page 3" in mixed.json()["message"]
+    assert client.get("/api/library").json()["total"] == 0
+
+    blank = client.post("/api/import/upload?filename=Blank.pdf", content=pdf_bytes(first, b"", last, b""))
+    assert blank.status_code == 201, blank.json()
+    with connect(tmp_path / "metadata.sqlite3") as db:
+        stored, = db.execute("SELECT text_path FROM chapters").fetchone()
+    assert (tmp_path / stored).read_text() == "The <body> element is literal prose.\n\nThis is the last page."
+    assert client.post("/api/jobs", json={"chapter_id": blank.json()["id"]}).status_code == 202
+
+
+def test_pdf_converter_inherits_a_memory_limit(client, tmp_path, monkeypatch):
+    converter = tmp_path / "bounded-pdftotext"
+    converter.write_text(
+        f"#!{sys.executable}\n"
+        "import resource\n"
+        f"assert all(0 < limit <= {pdf_import._MEMORY_LIMIT} for limit in resource.getrlimit(resource.RLIMIT_AS))\n"
+        "print('Original bounded text.')\n"
+    )
+    converter.chmod(0o700)
+    monkeypatch.setattr(pdf_import.shutil, "which", lambda _name: str(converter))
+    response = client.post("/api/import/upload?filename=Bounded.pdf", content=ORIGINAL_PDF)
+    assert response.status_code == 201, response.json()

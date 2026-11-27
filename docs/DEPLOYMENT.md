@@ -10,7 +10,9 @@ service restart and actual HTTPS frontend, API, generation and downloads pass.
 Use a stable deployment checkout on a local filesystem; moving/removing a
 worktree breaks the unit's absolute paths. Use the existing uv executable (its
 absolute path when absent from PATH), Python 3.11 or 3.12 and system
-FFmpeg/ffprobe. No duplicate uv or GPU runtime is needed. Set `UV` privately to
+FFmpeg/ffprobe. Install Poppler (`poppler-utils` on Debian or Ubuntu) and check
+that `pdftotext` and `pdfimages` are on the service's PATH for PDF import. No
+duplicate uv or GPU runtime is needed. Set `UV` privately to
 that executable and work from the deployment checkout:
 
 ```sh
@@ -148,7 +150,10 @@ Host/scheme/proxy inspection without relaxing guards. A healthy API or cached
 retained chapter is not fresh generation proof. Record original input hash and
 length, ordered chunk coverage, job/output IDs, elapsed time, model provenance
 and actual completion. Retained original issue #4 audio may be **reused** for
-additional player checks with unchanged-source verification.
+additional player checks with unchanged-source verification. When qualifying PDF
+import, upload a small original PDF with selectable text over this same HTTPS
+route and verify it appears in the library. A scan without selectable text
+should instead report that it needs OCR.
 
 For the completed `JOB_ID`, save full HTTPS downloads, response headers, HTTP
 results, content lengths, hashes and ffprobe duration/size/codec privately.

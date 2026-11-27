@@ -26,6 +26,6 @@ jobs:
       - name: Install isolated dependencies
         run: uv sync --locked --extra dev --python '${{ matrix.python-version }}'
       - name: Ensure Poppler is available for PDF tests
-        run: command -v pdftotext || (sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils)
+        run: (command -v pdftotext && command -v pdfimages) || (sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils)
       - name: Unit and API tests
         run: uv run --python '${{ matrix.python-version }}' --extra dev pytest -q

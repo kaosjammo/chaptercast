@@ -158,9 +158,10 @@ Limits are fixed to keep import bounded:
 | EPUB metadata or individual XHTML chapter | 2 MiB |
 | FFN response | 2 MiB HTML, 20 seconds total, 3 redirects |
 
-PDF import uses the local Poppler `pdftotext` executable. Install Poppler on the
-ChapterCast host (`poppler-utils` on Debian or Ubuntu). ChapterCast saves only
-the extracted selectable text, in page order. Scanned pages need OCR first.
+PDF import uses the local Poppler `pdftotext` and `pdfimages` executables.
+Install Poppler on the ChapterCast host (`poppler-utils` on Debian or Ubuntu).
+ChapterCast saves only selectable text in page order. If a page contains images
+but has no selectable text, run OCR first. Blank pages are skipped.
 
 EPUB supports unencrypted ZIP stored/deflated members and local XHTML spine
 chapters (EPUB 2/3). Duplicate/unsafe member paths, symlinks, encryption, bad CRCs,

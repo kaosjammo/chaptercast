@@ -37,7 +37,8 @@ class Chapter:
         return len(re.split(r"\n\s*\n", self.text))
 
 
-def text_chapter(text: str, exclude_notes: bool = False, title: str = "Imported chapter") -> Chapter:
+def text_chapter(text: str, exclude_notes: bool = False, title: str = "Imported chapter",
+                 *, reject_html: bool = True) -> Chapter:
     try:
         size = len(text.encode("utf-8"))
     except UnicodeError as exc:
@@ -46,7 +47,7 @@ def text_chapter(text: str, exclude_notes: bool = False, title: str = "Imported 
         raise ImportFailure("too_large", "Chapter text exceeds the 1 MiB limit.", 413)
     if any(ord(c) < 32 and c not in "\t\r\n" for c in text):
         raise ImportFailure("invalid_text", "Text contains unsupported control characters.")
-    if re.search(r"<(?:!doctype\s+html|html|body)\b", text, re.I):
+    if reject_html and re.search(r"<(?:!doctype\s+html|html|body)\b", text, re.I):
         raise ImportFailure("invalid_text", "Paste story text or upload TXT, not an HTML page or bot check.")
     text = text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n").strip()
     paragraphs = re.split(r"\n[ \t]*\n(?:[ \t]*\n)*", text)

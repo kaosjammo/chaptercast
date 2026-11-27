@@ -110,7 +110,8 @@ class JobStore:
             try:
                 with self.private_path(chapter["text_path"], "uploads").open("rb") as stream:
                     raw = stream.read(MAX_TEXT_BYTES + 1)
-                text = text_chapter(raw.decode("utf-8")).text
+                # Import routes have already converted this file to plain text.
+                    text = text_chapter(raw.decode("utf-8"), reject_html=False).text
             except (OSError, UnicodeError) as exc:
                 raise JobFailure("missing_text", "Chapter text is unavailable or invalid.") from exc
             return self._enqueue(db, chapter_id, text, settings)
